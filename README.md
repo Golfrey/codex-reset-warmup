@@ -35,6 +35,16 @@ Auto timer warmups use `host.model.execute`. Manual warmups can use `host_model`
 
 The idle check is a watchdog for auths that currently have no reset timer. Every `idle_check_interval_minutes`, it lists Codex auths, skips auths that already have timers, and sends a warmup/check request for the remaining auths. In `direct_codex` mode, the response is parsed the same way as manual direct warmup, so reset headers or `usage_limit_reached` bodies can register the next normal reset timer.
 
+## Code Layout
+
+The plugin implementation is split by responsibility so each file has one main job:
+
+- `plugin.go` contains shared constants and the host method dispatcher.
+- `state.go`, `types.go`, and `config.go` define in-memory state, message shapes, and config normalization.
+- `usage.go`, `reset_parse.go`, and `idle_check.go` turn usage/reset clues into scheduled warmup timers.
+- `warmup.go`, `auth.go`, and `scheduler.go` run warmups, fetch auth material, and pin warmup requests to the intended auth.
+- `management.go`, `registration.go`, and `envelope.go` handle the management page, plugin registration, and ABI response envelopes.
+
 ## Build
 
 From this directory:
