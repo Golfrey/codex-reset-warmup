@@ -3,6 +3,8 @@ package main
 // Package-level constants and the small method dispatcher live here.
 // Each branch hands off quickly so the plugin entry point stays easy to scan.
 import (
+	"time"
+
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 )
 
@@ -22,6 +24,7 @@ const (
 	resourceContentType  = "text/html; charset=utf-8"
 
 	defaultIdleCheckIntervalMinutes = 120
+	startupIdleCheckDelay           = time.Minute
 	fiveHourMinutes                 = int64(300)
 	weeklyMinutes                   = int64(10080)
 	fiveHourSeconds                 = int64(18000)

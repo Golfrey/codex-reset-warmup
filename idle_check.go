@@ -16,7 +16,7 @@ func (s *pluginState) restartIdleCheckLocked(now time.Time) {
 	if !s.cfg.Enabled || !s.cfg.IdleCheckEnabled {
 		return
 	}
-	s.scheduleIdleCheckLocked(now, time.Duration(s.cfg.IdleCheckIntervalMinutes)*time.Minute)
+	s.scheduleIdleCheckLocked(now, startupIdleCheckDelay)
 }
 
 func (s *pluginState) scheduleIdleCheckLocked(now time.Time, delay time.Duration) {

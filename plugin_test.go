@@ -559,9 +559,9 @@ func TestIdleCheckDirectCodexSchedulesWhenNoTimer(t *testing.T) {
 func TestConfigureSchedulesIdleCheck(t *testing.T) {
 	state := newPluginState(nil)
 	var timer *fakeTimer
-	var delay time.Duration
+	var delays []time.Duration
 	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
-		delay = d
+		delays = append(delays, d)
 		timer = &fakeTimer{fire: f}
 		return timer
 	}
@@ -572,14 +572,18 @@ func TestConfigureSchedulesIdleCheck(t *testing.T) {
 	if errConfigure := state.configure(rawReq); errConfigure != nil {
 		t.Fatalf("configure() error = %v", errConfigure)
 	}
-	if timer == nil || delay != 2*time.Minute {
-		t.Fatalf("idle check timer = %#v delay = %s, want 2m", timer, delay)
+	if timer == nil || len(delays) != 1 || delays[0] != time.Minute {
+		t.Fatalf("idle check timer = %#v delays = %v, want startup 1m", timer, delays)
 	}
 	state.mu.Lock()
 	next := state.idleCheckNextAt
 	state.mu.Unlock()
 	if next.IsZero() {
 		t.Fatal("idleCheckNextAt was not set")
+	}
+	timer.fire()
+	if len(delays) != 2 || delays[1] != 2*time.Minute {
+		t.Fatalf("idle check delays after fire = %v, want recurring 2m", delays)
 	}
 }
 
