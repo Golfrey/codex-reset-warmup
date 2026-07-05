@@ -1,0 +1,57 @@
+# Minimal CLIProxyAPI config for testing the codex-reset-warmup plugin.
+#
+# Run from the repository root:
+#
+#   go build -buildmode=c-shared -o /tmp/codex-reset-warmup.dylib ./plugin/codex-reset-warmup
+#   go run ./cmd/server --config plugin/codex-reset-warmup/config.test.yaml
+#
+# Then use your normal OpenAI-compatible endpoint with:
+#
+#   Authorization: Bearer test-api-key
+#
+# The plugin status page is available at:
+#
+#   http://127.0.0.1:8318/v0/resource/plugins/codex-reset-warmup/status
+#
+# with:
+#
+#   X-Management-Key: test-management-key
+
+port: 8318
+debug: true
+request-log: true
+remote-management:
+  allow-remote: false
+  secret-key: "$2a$10$0LXRv.fgjaTNN6uZebDa1OUZe76Gqd51MQnAZFdkd90X798boZ.5a"
+  disable-control-panel: true
+  disable-auto-update: true
+api-keys:
+  - "test-api-key"
+# Reuse existing Codex OAuth auth JSON files.
+auth-dir: "~/.cli-proxy-api"
+plugins:
+  enabled: true
+# The test build command above writes /tmp/codex-reset-warmup.dylib.
+  dir: "/tmp"
+  configs:
+    codex-reset-warmup:
+      enabled: true
+      priority: 1
+      warmup_model: "gpt-5.4-mini"
+      warmup_prompt: "ping"
+      warmup_stream: false
+      # Direct mode uses host.auth.get for the selected auth file and posts to
+      # Codex upstream directly, bypassing CPA priority-based auth selection.
+      manual_mode: "direct_codex"
+      cpa_base_url: "http://127.0.0.1:8318"
+      cpa_api_key: "test-api-key"
+      codex_base_url: "https://chatgpt.com/backend-api/codex"
+      schedule_five_hour: true
+      schedule_weekly: true
+
+# Optional: uncomment only if you want to test with a Codex API key instead of
+# existing Codex OAuth auth files. The reset-warmup behavior is most useful with
+# OAuth auths that produce Codex usage/reset headers.
+#
+# codex-api-key:
+#   - api-key: "sk-..."
