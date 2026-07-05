@@ -21,22 +21,24 @@ import (
 )
 
 const (
-	pluginName          = "codex-reset-warmup"
-	pluginVersion       = "0.1.0"
-	defaultWarmupModel  = "gpt-5.4-mini"
-	defaultWarmupPrompt = "ping"
-	defaultManualMode   = "host_model"
-	defaultCPABaseURL   = "http://127.0.0.1:8318"
-	defaultCodexBaseURL = "https://chatgpt.com/backend-api/codex"
-	headerSecret        = "X-Codex-Reset-Warmup"
-	headerTargetAuthID  = "X-Codex-Reset-Warmup-Auth-Id"
-	resourcePath        = "/status"
-	resourceContentType = "text/html; charset=utf-8"
+	pluginName           = "codex-reset-warmup"
+	pluginVersion        = "0.1.0"
+	defaultWarmupModel   = "gpt-5.4-mini"
+	defaultWarmupPrompt  = "ping"
+	defaultManualMode    = "host_model"
+	defaultIdleCheckMode = "direct_codex"
+	defaultCPABaseURL    = "http://127.0.0.1:8318"
+	defaultCodexBaseURL  = "https://chatgpt.com/backend-api/codex"
+	headerSecret         = "X-Codex-Reset-Warmup"
+	headerTargetAuthID   = "X-Codex-Reset-Warmup-Auth-Id"
+	resourcePath         = "/status"
+	resourceContentType  = "text/html; charset=utf-8"
 
-	fiveHourMinutes = int64(300)
-	weeklyMinutes   = int64(10080)
-	fiveHourSeconds = int64(18000)
-	weeklySeconds   = int64(604800)
+	defaultIdleCheckIntervalMinutes = 120
+	fiveHourMinutes                 = int64(300)
+	weeklyMinutes                   = int64(10080)
+	fiveHourSeconds                 = int64(18000)
+	weeklySeconds                   = int64(604800)
 )
 
 type hostClient interface {
@@ -77,16 +79,19 @@ type lifecycleRequest struct {
 }
 
 type pluginConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	WarmupModel      string `yaml:"warmup_model"`
-	WarmupPrompt     string `yaml:"warmup_prompt"`
-	WarmupStream     bool   `yaml:"warmup_stream"`
-	ManualMode       string `yaml:"manual_mode"`
-	CPABaseURL       string `yaml:"cpa_base_url"`
-	CPAAPIKey        string `yaml:"cpa_api_key"`
-	CodexBaseURL     string `yaml:"codex_base_url"`
-	ScheduleFiveHour bool   `yaml:"schedule_five_hour"`
-	ScheduleWeekly   bool   `yaml:"schedule_weekly"`
+	Enabled                  bool   `yaml:"enabled"`
+	WarmupModel              string `yaml:"warmup_model"`
+	WarmupPrompt             string `yaml:"warmup_prompt"`
+	WarmupStream             bool   `yaml:"warmup_stream"`
+	ManualMode               string `yaml:"manual_mode"`
+	CPABaseURL               string `yaml:"cpa_base_url"`
+	CPAAPIKey                string `yaml:"cpa_api_key"`
+	CodexBaseURL             string `yaml:"codex_base_url"`
+	IdleCheckEnabled         bool   `yaml:"idle_check_enabled"`
+	IdleCheckMode            string `yaml:"idle_check_mode"`
+	IdleCheckIntervalMinutes int    `yaml:"idle_check_interval_minutes"`
+	ScheduleFiveHour         bool   `yaml:"schedule_five_hour"`
+	ScheduleWeekly           bool   `yaml:"schedule_weekly"`
 }
 
 type registration struct {
@@ -159,6 +164,14 @@ type warmupResult struct {
 	Error      string    `json:"error,omitempty"`
 }
 
+type idleCheckResult struct {
+	RanAt   time.Time `json:"ran_at"`
+	Checked int       `json:"checked"`
+	Skipped int       `json:"skipped"`
+	Failed  int       `json:"failed"`
+	Error   string    `json:"error,omitempty"`
+}
+
 type resetBoundary struct {
 	AuthIndex string
 	AuthID    string
@@ -183,6 +196,11 @@ type pluginState struct {
 	cfg     pluginConfig
 	timers  map[string]*timerEntry
 	results map[string]warmupResult
+
+	idleCheckTimer   stoppableTimer
+	idleCheckNextAt  time.Time
+	idleCheckRunning bool
+	idleCheckLast    idleCheckResult
 }
 
 func newPluginState(host hostClient) *pluginState {
@@ -201,15 +219,18 @@ func newPluginState(host hostClient) *pluginState {
 
 func defaultConfig() pluginConfig {
 	return pluginConfig{
-		Enabled:          true,
-		WarmupModel:      defaultWarmupModel,
-		WarmupPrompt:     defaultWarmupPrompt,
-		WarmupStream:     false,
-		ManualMode:       defaultManualMode,
-		CPABaseURL:       defaultCPABaseURL,
-		CodexBaseURL:     defaultCodexBaseURL,
-		ScheduleFiveHour: true,
-		ScheduleWeekly:   true,
+		Enabled:                  true,
+		WarmupModel:              defaultWarmupModel,
+		WarmupPrompt:             defaultWarmupPrompt,
+		WarmupStream:             false,
+		ManualMode:               defaultManualMode,
+		CPABaseURL:               defaultCPABaseURL,
+		CodexBaseURL:             defaultCodexBaseURL,
+		IdleCheckEnabled:         true,
+		IdleCheckMode:            defaultIdleCheckMode,
+		IdleCheckIntervalMinutes: defaultIdleCheckIntervalMinutes,
+		ScheduleFiveHour:         true,
+		ScheduleWeekly:           true,
 	}
 }
 
@@ -280,10 +301,111 @@ func (s *pluginState) configure(raw []byte) error {
 	if cfg.CodexBaseURL == "" {
 		cfg.CodexBaseURL = defaultCodexBaseURL
 	}
+	cfg.IdleCheckMode = strings.ToLower(strings.TrimSpace(cfg.IdleCheckMode))
+	if cfg.IdleCheckMode == "" {
+		cfg.IdleCheckMode = defaultIdleCheckMode
+	}
+	if cfg.IdleCheckIntervalMinutes <= 0 {
+		cfg.IdleCheckIntervalMinutes = defaultIdleCheckIntervalMinutes
+	}
 	s.mu.Lock()
 	s.cfg = cfg
+	s.restartIdleCheckLocked(time.Now())
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *pluginState) restartIdleCheckLocked(now time.Time) {
+	if s.idleCheckTimer != nil {
+		s.idleCheckTimer.Stop()
+		s.idleCheckTimer = nil
+	}
+	s.idleCheckNextAt = time.Time{}
+	if !s.cfg.Enabled || !s.cfg.IdleCheckEnabled {
+		return
+	}
+	s.scheduleIdleCheckLocked(now, time.Duration(s.cfg.IdleCheckIntervalMinutes)*time.Minute)
+}
+
+func (s *pluginState) scheduleIdleCheckLocked(now time.Time, delay time.Duration) {
+	if delay <= 0 {
+		delay = time.Duration(defaultIdleCheckIntervalMinutes) * time.Minute
+	}
+	s.idleCheckNextAt = now.Add(delay)
+	s.idleCheckTimer = s.timerFactory(delay, s.fireIdleCheck)
+}
+
+func (s *pluginState) fireIdleCheck() {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.idleCheckTimer = nil
+	s.idleCheckNextAt = time.Time{}
+	if !cfg.Enabled || !cfg.IdleCheckEnabled {
+		s.mu.Unlock()
+		return
+	}
+	if s.idleCheckRunning {
+		s.scheduleIdleCheckLocked(time.Now(), time.Duration(cfg.IdleCheckIntervalMinutes)*time.Minute)
+		s.mu.Unlock()
+		return
+	}
+	s.idleCheckRunning = true
+	s.mu.Unlock()
+
+	result := s.runIdleCheck(cfg)
+
+	s.mu.Lock()
+	s.idleCheckRunning = false
+	s.idleCheckLast = result
+	current := s.cfg
+	if current.Enabled && current.IdleCheckEnabled {
+		s.scheduleIdleCheckLocked(time.Now(), time.Duration(current.IdleCheckIntervalMinutes)*time.Minute)
+	}
+	s.mu.Unlock()
+}
+
+func (s *pluginState) runIdleCheck(cfg pluginConfig) idleCheckResult {
+	result := idleCheckResult{RanAt: time.Now()}
+	auths, errAuths := s.listCodexAuths()
+	if errAuths != nil {
+		result.Error = errAuths.Error()
+		return result
+	}
+	for _, auth := range auths {
+		authIndex := strings.TrimSpace(auth.AuthIndex)
+		if authIndex == "" {
+			continue
+		}
+		if s.hasTimer(authIndex) {
+			result.Skipped++
+			continue
+		}
+		entry := timerEntry{
+			AuthIndex: authIndex,
+			AuthID:    strings.TrimSpace(auth.ID),
+			Window:    "idle_check",
+		}
+		warmup := s.runWarmupWithMode(entry, cfg, cfg.IdleCheckMode)
+		s.mu.Lock()
+		s.results[authIndex] = warmup
+		s.mu.Unlock()
+		result.Checked++
+		if warmup.Error != "" {
+			result.Failed++
+		}
+	}
+	return result
+}
+
+func (s *pluginState) hasTimer(authIndex string) bool {
+	authIndex = strings.TrimSpace(authIndex)
+	if authIndex == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, exists := s.timers[authIndex]
+	return exists
 }
 
 func pluginRegistration() registration {
@@ -304,6 +426,9 @@ func pluginRegistration() registration {
 				{Name: "cpa_base_url", Type: pluginapi.ConfigFieldTypeString, Description: "CLIProxyAPI base URL for manual_mode=http."},
 				{Name: "cpa_api_key", Type: pluginapi.ConfigFieldTypeString, Description: "CLIProxyAPI API key for manual_mode=http."},
 				{Name: "codex_base_url", Type: pluginapi.ConfigFieldTypeString, Description: "Codex upstream base URL for manual_mode=direct_codex."},
+				{Name: "idle_check_enabled", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Periodically checks idle Codex auths that have no registered reset timer."},
+				{Name: "idle_check_mode", Type: pluginapi.ConfigFieldTypeString, Description: "Idle check transport: host_model, http, or direct_codex."},
+				{Name: "idle_check_interval_minutes", Type: pluginapi.ConfigFieldTypeInteger, Description: "Minutes between idle checks when no timer is registered."},
 				{Name: "schedule_five_hour", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Schedules warmups for Codex 5-hour windows."},
 				{Name: "schedule_weekly", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Schedules warmups for Codex weekly windows."},
 			},
@@ -477,18 +602,22 @@ func (s *pluginState) runManualWarmup(authIndex string) warmupResult {
 		AuthID:    strings.TrimSpace(runtimeAuth.ID),
 		Window:    "manual",
 	}
-	switch cfg.ManualMode {
-	case "http":
-		result = s.runManualHTTPWarmup(entry, cfg)
-	case "direct_codex":
-		result = s.runManualDirectCodexWarmup(entry, cfg)
-	default:
-		result = s.runWarmup(entry, cfg)
-	}
+	result = s.runWarmupWithMode(entry, cfg, cfg.ManualMode)
 	s.mu.Lock()
 	s.results[authIndex] = result
 	s.mu.Unlock()
 	return result
+}
+
+func (s *pluginState) runWarmupWithMode(entry timerEntry, cfg pluginConfig, mode string) warmupResult {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "http":
+		return s.runManualHTTPWarmup(entry, cfg)
+	case "direct_codex":
+		return s.runManualDirectCodexWarmup(entry, cfg)
+	default:
+		return s.runWarmup(entry, cfg)
+	}
 }
 
 func (s *pluginState) runManualDirectCodexWarmup(entry timerEntry, cfg pluginConfig) warmupResult {
@@ -1134,6 +1263,9 @@ func (s *pluginState) handleManagement(raw []byte) ([]byte, error) {
 func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, notice string, noticeError string) []byte {
 	s.mu.Lock()
 	cfg := s.cfg
+	idleNextAt := s.idleCheckNextAt
+	idleRunning := s.idleCheckRunning
+	idleLast := s.idleCheckLast
 	timers := make([]timerEntry, 0, len(s.timers))
 	for _, entry := range s.timers {
 		if entry != nil {
@@ -1178,6 +1310,24 @@ func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, noti
 	}
 	if cfg.ManualMode == "direct_codex" {
 		writeDefinition(&out, "Codex base URL", cfg.CodexBaseURL)
+	}
+	writeDefinition(&out, "Idle check", strconv.FormatBool(cfg.IdleCheckEnabled))
+	writeDefinition(&out, "Idle check mode", cfg.IdleCheckMode)
+	writeDefinition(&out, "Idle check interval minutes", strconv.Itoa(cfg.IdleCheckIntervalMinutes))
+	if idleRunning {
+		writeDefinition(&out, "Idle check running", "true")
+	} else {
+		writeDefinition(&out, "Idle check running", "false")
+	}
+	if !idleNextAt.IsZero() {
+		writeDefinition(&out, "Next idle check", idleNextAt.Format(time.RFC3339))
+	}
+	if !idleLast.RanAt.IsZero() {
+		last := fmt.Sprintf("%s checked=%d skipped=%d failed=%d", idleLast.RanAt.Format(time.RFC3339), idleLast.Checked, idleLast.Skipped, idleLast.Failed)
+		if idleLast.Error != "" {
+			last += " error=" + idleLast.Error
+		}
+		writeDefinition(&out, "Last idle check", last)
 	}
 	writeDefinition(&out, "5-hour windows", strconv.FormatBool(cfg.ScheduleFiveHour))
 	writeDefinition(&out, "Weekly windows", strconv.FormatBool(cfg.ScheduleWeekly))
@@ -1266,6 +1416,12 @@ func htmlResponse(statusCode int, body []byte) managementResponse {
 func (s *pluginState) shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.idleCheckTimer != nil {
+		s.idleCheckTimer.Stop()
+		s.idleCheckTimer = nil
+	}
+	s.idleCheckNextAt = time.Time{}
+	s.idleCheckRunning = false
 	for key, entry := range s.timers {
 		if entry != nil && entry.timer != nil {
 			entry.timer.Stop()

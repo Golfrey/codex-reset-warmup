@@ -20,6 +20,9 @@ plugins:
       cpa_base_url: http://127.0.0.1:8318
       cpa_api_key: ""
       codex_base_url: https://chatgpt.com/backend-api/codex
+      idle_check_enabled: true
+      idle_check_mode: direct_codex
+      idle_check_interval_minutes: 120
       schedule_five_hour: true
       schedule_weekly: true
 ```
@@ -29,6 +32,8 @@ If a timer already exists for an auth, later usage records for that auth are ign
 Auto timer warmups use `host.model.execute`. Manual warmups can use `host_model`, `http`, or `direct_codex`.
 
 `http` posts to the configured local CLIProxyAPI `/v1/chat/completions` endpoint with the plugin's private scheduler headers. `direct_codex` reads the selected auth JSON with `host.auth.get` and posts directly to the Codex `/responses` upstream, bypassing CPA priority-based auth selection.
+
+The idle check is a watchdog for auths that currently have no reset timer. Every `idle_check_interval_minutes`, it lists Codex auths, skips auths that already have timers, and sends a warmup/check request for the remaining auths. In `direct_codex` mode, the response is parsed the same way as manual direct warmup, so reset headers or `usage_limit_reached` bodies can register the next normal reset timer.
 
 ## Build
 

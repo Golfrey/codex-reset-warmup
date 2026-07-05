@@ -46,6 +46,9 @@ plugins:
       cpa_base_url: "http://127.0.0.1:8318"
       cpa_api_key: "test-api-key"
       codex_base_url: "https://chatgpt.com/backend-api/codex"
+      idle_check_enabled: true
+      idle_check_mode: "direct_codex"
+      idle_check_interval_minutes: 120
       schedule_five_hour: true
       schedule_weekly: true
 

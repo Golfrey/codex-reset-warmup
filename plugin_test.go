@@ -498,6 +498,91 @@ func TestRunManualWarmupDirectCodexSchedulesFromUsageLimitResponse(t *testing.T)
 	}
 }
 
+func TestIdleCheckSkipsAuthWithExistingTimer(t *testing.T) {
+	host := &fakeHost{}
+	state := newPluginState(host)
+	state.mu.Lock()
+	state.cfg.IdleCheckMode = "direct_codex"
+	state.timers["idx-1"] = &timerEntry{AuthIndex: "idx-1", ResetAt: time.Now().Add(time.Hour)}
+	cfg := state.cfg
+	state.mu.Unlock()
+
+	result := state.runIdleCheck(cfg)
+	if result.Checked != 0 || result.Skipped != 1 || result.Failed != 0 {
+		t.Fatalf("idle check result = %#v, want one skipped auth only", result)
+	}
+	for _, call := range host.calls {
+		if call.method == "host.auth.get" || call.method == "host.http.do" {
+			t.Fatalf("idle check called %s despite existing timer; calls = %#v", call.method, host.calls)
+		}
+	}
+}
+
+func TestIdleCheckDirectCodexSchedulesWhenNoTimer(t *testing.T) {
+	host := &fakeHost{
+		httpResponse: pluginapi.HTTPResponse{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       []byte(`{"error":{"type":"usage_limit_reached","message":"limit","resets_in_seconds":120}}`),
+		},
+	}
+	state := newPluginState(host)
+	var timer *fakeTimer
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		timer = &fakeTimer{fire: f}
+		return timer
+	}
+	state.mu.Lock()
+	state.cfg.IdleCheckMode = "direct_codex"
+	state.cfg.WarmupModel = "gpt-5.4-mini"
+	cfg := state.cfg
+	state.mu.Unlock()
+
+	result := state.runIdleCheck(cfg)
+	if result.Checked != 1 || result.Skipped != 0 || result.Failed != 1 {
+		t.Fatalf("idle check result = %#v, want one checked failed warmup", result)
+	}
+	if timer == nil {
+		t.Fatal("timer was not created")
+	}
+	state.mu.Lock()
+	entry := state.timers["idx-1"]
+	stored := state.results["idx-1"]
+	state.mu.Unlock()
+	if entry == nil || entry.Window != "usage_limit_reached" || entry.AuthID != "auth-runtime" {
+		t.Fatalf("timer entry = %#v, want usage_limit_reached for auth-runtime", entry)
+	}
+	if stored.StatusCode != http.StatusTooManyRequests || !strings.Contains(stored.Error, "limit") {
+		t.Fatalf("stored result = %#v, want 429 limit error", stored)
+	}
+}
+
+func TestConfigureSchedulesIdleCheck(t *testing.T) {
+	state := newPluginState(nil)
+	var timer *fakeTimer
+	var delay time.Duration
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		delay = d
+		timer = &fakeTimer{fire: f}
+		return timer
+	}
+	rawReq, errMarshal := json.Marshal(lifecycleRequest{ConfigYAML: []byte("idle_check_interval_minutes: 2\n")})
+	if errMarshal != nil {
+		t.Fatal(errMarshal)
+	}
+	if errConfigure := state.configure(rawReq); errConfigure != nil {
+		t.Fatalf("configure() error = %v", errConfigure)
+	}
+	if timer == nil || delay != 2*time.Minute {
+		t.Fatalf("idle check timer = %#v delay = %s, want 2m", timer, delay)
+	}
+	state.mu.Lock()
+	next := state.idleCheckNextAt
+	state.mu.Unlock()
+	if next.IsZero() {
+		t.Fatal("idleCheckNextAt was not set")
+	}
+}
+
 func TestRenderStatusPageIncludesManualWarmupLink(t *testing.T) {
 	state := newPluginState(nil)
 	page := string(state.renderStatusPage([]pluginapi.HostAuthFileEntry{{
