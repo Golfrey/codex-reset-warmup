@@ -587,14 +587,101 @@ func TestConfigureSchedulesIdleCheck(t *testing.T) {
 	}
 }
 
-func TestRenderStatusPageIncludesManualWarmupLink(t *testing.T) {
+func TestManagementRegisterIncludesResourceTabAndWarmupPOSTRoute(t *testing.T) {
+	state := newPluginState(nil)
+	rawResp, errRegister := state.handleMethod("management.register", nil)
+	if errRegister != nil {
+		t.Fatalf("management.register error = %v", errRegister)
+	}
+	var env envelope
+	if errUnmarshal := json.Unmarshal(rawResp, &env); errUnmarshal != nil {
+		t.Fatalf("decode envelope: %v", errUnmarshal)
+	}
+	if !env.OK {
+		t.Fatalf("envelope = %#v, want ok", env)
+	}
+	var reg managementRegistration
+	if errUnmarshal := json.Unmarshal(env.Result, &reg); errUnmarshal != nil {
+		t.Fatalf("decode registration: %v", errUnmarshal)
+	}
+	if len(reg.Resources) != 1 || reg.Resources[0].Path != resourcePath || reg.Resources[0].Menu != "Codex Reset Warmup" {
+		t.Fatalf("resources = %#v, want status tab", reg.Resources)
+	}
+	if len(reg.Routes) != 1 || reg.Routes[0].Method != http.MethodPost || reg.Routes[0].Path != managementWarmupPath {
+		t.Fatalf("routes = %#v, want POST warmup route", reg.Routes)
+	}
+}
+
+func TestHandleManagementManualWarmupPOSTRedirectsToStatusTab(t *testing.T) {
+	host := &fakeHost{}
+	state := newPluginState(host)
+	req := managementRequest{
+		Method: http.MethodPost,
+		Path:   warmupActionPath,
+		Headers: http.Header{
+			"Content-Type": []string{"application/x-www-form-urlencoded"},
+		},
+		Body: []byte("auth_index=idx-1"),
+	}
+	rawReq, errMarshal := json.Marshal(req)
+	if errMarshal != nil {
+		t.Fatal(errMarshal)
+	}
+	rawResp, errHandle := state.handleManagement(rawReq)
+	if errHandle != nil {
+		t.Fatalf("handleManagement() error = %v", errHandle)
+	}
+	var env envelope
+	if errUnmarshal := json.Unmarshal(rawResp, &env); errUnmarshal != nil {
+		t.Fatalf("decode envelope: %v", errUnmarshal)
+	}
+	if !env.OK {
+		t.Fatalf("envelope = %#v, want ok", env)
+	}
+	var resp managementResponse
+	if errUnmarshal := json.Unmarshal(env.Result, &resp); errUnmarshal != nil {
+		t.Fatalf("decode management response: %v", errUnmarshal)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", resp.StatusCode)
+	}
+	location := resp.Headers.Get("Location")
+	if !strings.HasPrefix(location, resourceFullPath+"?") || !strings.Contains(location, "notice=warmup_ok") || !strings.Contains(location, "auth_index=idx-1") {
+		t.Fatalf("Location = %q, want status tab success redirect", location)
+	}
+}
+
+func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 	state := newPluginState(nil)
 	page := string(state.renderStatusPage([]pluginapi.HostAuthFileEntry{{
 		AuthIndex: "idx-1",
 		Provider:  "codex",
 		Name:      "codex-a.json",
 	}}, "", ""))
-	if !strings.Contains(page, "Manual Warmup") || !strings.Contains(page, "action=warmup") || !strings.Contains(page, "auth_index=idx-1") {
-		t.Fatalf("status page missing manual warmup link:\n%s", page)
+	for _, want := range []string{"Operational Summary", "Manual Warmup", "Timers", "Recent Warmups", "Runtime Settings"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("status page missing %q:\n%s", want, page)
+		}
+	}
+	if !strings.Contains(page, `method="post"`) || !strings.Contains(page, warmupActionPath) || !strings.Contains(page, `name="auth_index" value="idx-1"`) {
+		t.Fatalf("status page missing manual warmup POST form:\n%s", page)
+	}
+	if strings.Contains(page, "action=warmup") {
+		t.Fatalf("status page still contains old GET warmup action:\n%s", page)
+	}
+}
+
+func TestRecentWarmupHealth(t *testing.T) {
+	noData := recentWarmupHealth(nil)
+	if noData.label != "No data" || noData.class != "neutral" {
+		t.Fatalf("no data health = %#v", noData)
+	}
+	healthy := recentWarmupHealth([]warmupResult{{RanAt: time.Unix(1000, 0), StatusCode: http.StatusOK}})
+	if healthy.label != "Healthy" || healthy.class != "ok" {
+		t.Fatalf("healthy = %#v", healthy)
+	}
+	attention := recentWarmupHealth([]warmupResult{{RanAt: time.Unix(1000, 0), StatusCode: http.StatusTooManyRequests, Error: "limit"}})
+	if attention.label != "Attention" || attention.class != "warn" {
+		t.Fatalf("attention = %#v", attention)
 	}
 }

@@ -1,7 +1,6 @@
 package main
 
 // Management page request handling and small HTML renderer.
-// The renderer is intentionally plain: no templates, no assets, just easy-to-debug HTML.
 import (
 	"bytes"
 	"encoding/json"
@@ -17,7 +16,13 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// handleManagement optionally runs a manual warmup, then renders the current status page.
+type warmupHealth struct {
+	label  string
+	class  string
+	detail string
+}
+
+// handleManagement renders the tab or runs authenticated tab actions.
 func (s *pluginState) handleManagement(raw []byte) ([]byte, error) {
 	var req managementRequest
 	if len(raw) > 0 {
@@ -25,21 +30,76 @@ func (s *pluginState) handleManagement(raw []byte) ([]byte, error) {
 			return nil, errUnmarshal
 		}
 	}
-	var notice string
-	var noticeError string
-	if strings.EqualFold(strings.TrimSpace(req.Query.Get("action")), "warmup") {
-		result := s.runManualWarmup(req.Query.Get("auth_index"))
-		if result.Error != "" {
-			noticeError = result.Error
-		} else {
-			notice = fmt.Sprintf("Manual warmup sent for auth_index %s with status %d.", result.AuthIndex, result.StatusCode)
-		}
+
+	if strings.EqualFold(strings.TrimSpace(req.Method), http.MethodPost) && strings.HasSuffix(strings.TrimSpace(req.Path), managementWarmupPath) {
+		return s.handleManualWarmupPost(req)
 	}
+
+	notice, noticeError := noticeFromQuery(req.Query)
 	auths, errAuths := s.listCodexAuths()
 	if errAuths != nil {
 		noticeError = errAuths.Error()
 	}
 	return okEnvelope(htmlResponse(http.StatusOK, s.renderStatusPage(auths, notice, noticeError)))
+}
+
+func (s *pluginState) handleManualWarmupPost(req managementRequest) ([]byte, error) {
+	authIndex := manualWarmupAuthIndex(req)
+	if authIndex == "" {
+		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", "", "", "auth_index is required")))
+	}
+
+	result := s.runManualWarmup(authIndex)
+	if result.Error != "" {
+		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", result.AuthIndex, strconv.Itoa(result.StatusCode), result.Error)))
+	}
+	return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_ok", result.AuthIndex, strconv.Itoa(result.StatusCode), "")))
+}
+
+func manualWarmupAuthIndex(req managementRequest) string {
+	if value := strings.TrimSpace(req.Query.Get("auth_index")); value != "" {
+		return value
+	}
+	values, errParse := url.ParseQuery(string(req.Body))
+	if errParse != nil {
+		return ""
+	}
+	return strings.TrimSpace(values.Get("auth_index"))
+}
+
+func manualWarmupRedirect(kind string, authIndex string, status string, message string) string {
+	values := url.Values{}
+	if kind != "" {
+		values.Set("notice", kind)
+	}
+	if authIndex != "" {
+		values.Set("auth_index", authIndex)
+	}
+	if status != "" && status != "0" {
+		values.Set("status", status)
+	}
+	if message != "" {
+		values.Set("message", message)
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return resourceFullPath + "?" + encoded
+	}
+	return resourceFullPath
+}
+
+func noticeFromQuery(query url.Values) (string, string) {
+	var notice string
+	var noticeError string
+	switch strings.TrimSpace(query.Get("notice")) {
+	case "warmup_ok":
+		notice = fmt.Sprintf("Manual warmup sent for auth_index %s with status %s.", query.Get("auth_index"), query.Get("status"))
+	case "warmup_error":
+		noticeError = query.Get("message")
+		if noticeError == "" {
+			noticeError = "Manual warmup failed."
+		}
+	}
+	return notice, noticeError
 }
 
 // renderStatusPage takes a snapshot first, then writes each visible section in order.
@@ -48,11 +108,12 @@ func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, noti
 
 	var out bytes.Buffer
 	writeStatusPageStart(&out, notice, noticeError)
-	writeConfigDefinitions(&out, snapshot)
+	writeOperationalSummary(&out, snapshot)
 	writeManualWarmupTable(&out, auths)
 	writeTimersTable(&out, snapshot.timers)
 	writeResultsTable(&out, snapshot.results)
-	out.WriteString("</body></html>")
+	writeRuntimeSettings(&out, snapshot)
+	out.WriteString("</main></body></html>")
 	return out.Bytes()
 }
 
@@ -90,23 +151,92 @@ func (s *pluginState) statusPageSnapshot() statusPageSnapshot {
 
 func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string) {
 	out.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>Codex Reset Warmup</title>")
-	out.WriteString("<style>body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;margin:2rem;line-height:1.45;color:#1f2933}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #d0d7de;padding:.45rem;text-align:left}th{background:#f6f8fa}code{background:#f6f8fa;border-radius:4px;padding:.1rem .3rem}.notice{color:#067647}.error{color:#b42318}</style>")
-	out.WriteString("</head><body><h1>Codex Reset Warmup</h1>")
+	out.WriteString("<style>:root{color-scheme:light;--bg:#f7f8fb;--panel:#fff;--text:#17202a;--muted:#667085;--border:#d8dee4;--soft:#f1f4f8;--accent:#2563eb;--ok:#087f5b;--warn:#b42318;--chip:#eef2ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.page{width:min(1180px,calc(100% - 40px));margin:0 auto;padding:28px 0 42px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}.eyebrow{margin:0 0 4px;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}h1{margin:0;font-size:28px;line-height:1.2;font-weight:750;letter-spacing:0}h2{margin:0 0 12px;font-size:17px;line-height:1.3;letter-spacing:0}.section{margin-top:18px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}.metric-label{color:var(--muted);font-size:12px;font-weight:650}.metric-value{margin-top:8px;font-size:22px;font-weight:760}.metric-detail{margin-top:6px;color:var(--muted);font-size:13px}.notice,.error{border-radius:8px;padding:10px 12px;margin:0 0 12px;border:1px solid}.notice{background:#ecfdf3;border-color:#abefc6;color:#067647}.error{background:#fef3f2;border-color:#fecdca;color:#b42318}.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}table{border-collapse:separate;border-spacing:0;width:100%;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--panel)}th,td{padding:11px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}th{background:var(--soft);color:#344054;font-size:12px;font-weight:700}tr:last-child td{border-bottom:0}code{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:5px;padding:2px 5px;font-size:12px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;border:1px solid transparent}.badge.ok{background:#ecfdf3;color:#067647;border-color:#abefc6}.badge.warn{background:#fef3f2;color:#b42318;border-color:#fecdca}.badge.neutral{background:#f2f4f7;color:#475467;border-color:#e4e7ec}.cell-error{color:var(--warn);font-weight:650}.button{appearance:none;border:1px solid #1d4ed8;background:var(--accent);color:#fff;border-radius:6px;padding:7px 11px;font-weight:700;cursor:pointer}.button:hover{background:#1d4ed8}.button:disabled{background:#e4e7ec;border-color:#d0d5dd;color:#98a2b3;cursor:not-allowed}.settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}.settings dt{color:var(--muted);font-size:12px;font-weight:650}.settings dd{margin:3px 0 0;font-weight:650;word-break:break-word}@media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.settings{grid-template-columns:1fr}}@media (max-width:620px){.page{width:min(100% - 24px,1180px);padding-top:18px}.topbar{display:block}.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:nowrap}}</style>")
+	out.WriteString("</head><body><main class=\"page\"><header class=\"topbar\"><div><p class=\"eyebrow\">Plugin</p><h1>Codex Reset Warmup</h1></div></header>")
 	if strings.TrimSpace(notice) != "" {
-		out.WriteString("<p class=\"notice\">")
+		out.WriteString("<div class=\"notice\" role=\"status\">")
 		out.WriteString(html.EscapeString(notice))
-		out.WriteString("</p>")
+		out.WriteString("</div>")
 	}
 	if strings.TrimSpace(noticeError) != "" {
-		out.WriteString("<p class=\"error\">")
+		out.WriteString("<div class=\"error\" role=\"alert\">")
 		out.WriteString(html.EscapeString(noticeError))
-		out.WriteString("</p>")
+		out.WriteString("</div>")
 	}
 }
 
-func writeConfigDefinitions(out *bytes.Buffer, snapshot statusPageSnapshot) {
+func writeOperationalSummary(out *bytes.Buffer, snapshot statusPageSnapshot) {
+	health := recentWarmupHealth(snapshot.results)
+	out.WriteString("<section class=\"section\"><h2>Operational Summary</h2><div class=\"grid\">")
+	writeMetricCard(out, "Enabled", boolLabel(snapshot.cfg.Enabled), boolDetail(snapshot.cfg.Enabled), boolClass(snapshot.cfg.Enabled))
+	writeMetricCard(out, "Scheduled timers", strconv.Itoa(len(snapshot.timers)), "active warmup timers", "neutral")
+	writeMetricCard(out, "Recent warmup health", health.label, health.detail, health.class)
+	nextIdle := "Not scheduled"
+	if !snapshot.idleNextAt.IsZero() {
+		nextIdle = snapshot.idleNextAt.Format(time.RFC3339)
+	}
+	writeMetricCard(out, "Next idle check", nextIdle, idleCheckDetail(snapshot), "neutral")
+	out.WriteString("</div></section>")
+}
+
+func writeMetricCard(out *bytes.Buffer, label string, value string, detail string, class string) {
+	out.WriteString("<div class=\"card\"><div class=\"metric-label\">")
+	out.WriteString(html.EscapeString(label))
+	out.WriteString("</div><div class=\"metric-value\"><span class=\"badge ")
+	out.WriteString(html.EscapeString(class))
+	out.WriteString("\">")
+	out.WriteString(html.EscapeString(value))
+	out.WriteString("</span></div><div class=\"metric-detail\">")
+	out.WriteString(html.EscapeString(detail))
+	out.WriteString("</div></div>")
+}
+
+func boolLabel(value bool) string {
+	if value {
+		return "Enabled"
+	}
+	return "Disabled"
+}
+
+func boolDetail(value bool) string {
+	if value {
+		return "warmup scheduling is active"
+	}
+	return "warmup scheduling is inactive"
+}
+
+func boolClass(value bool) string {
+	if value {
+		return "ok"
+	}
+	return "warn"
+}
+
+func idleCheckDetail(snapshot statusPageSnapshot) string {
+	if snapshot.idleRunning {
+		return "idle check is running"
+	}
+	if snapshot.cfg.IdleCheckEnabled {
+		return "idle check is enabled"
+	}
+	return "idle check is disabled"
+}
+
+func recentWarmupHealth(results []warmupResult) warmupHealth {
+	if len(results) == 0 {
+		return warmupHealth{label: "No data", class: "neutral", detail: "no warmup has run"}
+	}
+	latest := results[0]
+	detail := "latest ran at " + latest.RanAt.Format(time.RFC3339)
+	if latest.Error != "" || latest.StatusCode < http.StatusOK || latest.StatusCode >= http.StatusMultipleChoices {
+		return warmupHealth{label: "Attention", class: "warn", detail: detail}
+	}
+	return warmupHealth{label: "Healthy", class: "ok", detail: detail}
+}
+
+func writeRuntimeSettings(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	cfg := snapshot.cfg
-	out.WriteString("<dl>")
+	out.WriteString("<section class=\"section\"><div class=\"panel\"><h2>Runtime Settings</h2><dl class=\"settings\">")
 	writeDefinition(out, "Enabled", strconv.FormatBool(cfg.Enabled))
 	writeDefinition(out, "Warmup model", cfg.WarmupModel)
 	writeDefinition(out, "Manual mode", cfg.ManualMode)
@@ -136,11 +266,11 @@ func writeConfigDefinitions(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	}
 	writeDefinition(out, "5-hour windows", strconv.FormatBool(cfg.ScheduleFiveHour))
 	writeDefinition(out, "Weekly windows", strconv.FormatBool(cfg.ScheduleWeekly))
-	out.WriteString("</dl>")
+	out.WriteString("</dl></div></section>")
 }
 
 func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEntry) {
-	out.WriteString("<h2>Manual Warmup</h2><table><thead><tr><th>Auth index</th><th>Name</th><th>Status</th><th>Action</th></tr></thead><tbody>")
+	out.WriteString("<section class=\"section\"><h2>Manual Warmup</h2><table><thead><tr><th>Auth index</th><th>Name</th><th>Status</th><th>Action</th></tr></thead><tbody>")
 	if len(auths) == 0 {
 		out.WriteString("<tr><td colspan=\"4\">No Codex auths found.</td></tr>")
 	}
@@ -154,17 +284,19 @@ func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEnt
 		if authIndex == "" {
 			out.WriteString("Missing auth index")
 		} else {
-			out.WriteString("<a href=\"?action=warmup&amp;auth_index=")
-			out.WriteString(url.QueryEscape(authIndex))
-			out.WriteString("\">Warm up now</a>")
+			out.WriteString("<form method=\"post\" action=\"")
+			out.WriteString(html.EscapeString(warmupActionPath))
+			out.WriteString("\"><input type=\"hidden\" name=\"auth_index\" value=\"")
+			out.WriteString(html.EscapeString(authIndex))
+			out.WriteString("\"><button class=\"button\" type=\"submit\">Run warmup</button></form>")
 		}
 		out.WriteString("</td></tr>")
 	}
-	out.WriteString("</tbody></table>")
+	out.WriteString("</tbody></table></section>")
 }
 
 func writeTimersTable(out *bytes.Buffer, timers []timerEntry) {
-	out.WriteString("<h2>Timers</h2><table><thead><tr><th>Auth index</th><th>Auth ID</th><th>Window</th><th>Reset at</th></tr></thead><tbody>")
+	out.WriteString("<section class=\"section\"><h2>Timers</h2><table><thead><tr><th>Auth index</th><th>Auth ID</th><th>Window</th><th>Reset at</th></tr></thead><tbody>")
 	if len(timers) == 0 {
 		out.WriteString("<tr><td colspan=\"4\">No timers registered.</td></tr>")
 	}
@@ -176,11 +308,11 @@ func writeTimersTable(out *bytes.Buffer, timers []timerEntry) {
 		writeTableCell(out, entry.ResetAt.Format(time.RFC3339), "")
 		out.WriteString("</tr>")
 	}
-	out.WriteString("</tbody></table>")
+	out.WriteString("</tbody></table></section>")
 }
 
 func writeResultsTable(out *bytes.Buffer, results []warmupResult) {
-	out.WriteString("<h2>Recent Warmups</h2><table><thead><tr><th>Auth index</th><th>Auth ID</th><th>Ran at</th><th>Status</th><th>Error</th></tr></thead><tbody>")
+	out.WriteString("<section class=\"section\"><h2>Recent Warmups</h2><table><thead><tr><th>Auth index</th><th>Auth ID</th><th>Ran at</th><th>Status</th><th>Error</th></tr></thead><tbody>")
 	if len(results) == 0 {
 		out.WriteString("<tr><td colspan=\"5\">No warmups have run.</td></tr>")
 	}
@@ -190,10 +322,10 @@ func writeResultsTable(out *bytes.Buffer, results []warmupResult) {
 		writeCodeCell(out, result.AuthID)
 		writeTableCell(out, result.RanAt.Format(time.RFC3339), "")
 		writeTableCell(out, strconv.Itoa(result.StatusCode), "")
-		writeTableCell(out, result.Error, "error")
+		writeTableCell(out, result.Error, "cell-error")
 		out.WriteString("</tr>")
 	}
-	out.WriteString("</tbody></table>")
+	out.WriteString("</tbody></table></section>")
 }
 
 func writeCodeCell(out *bytes.Buffer, value string) {
@@ -229,5 +361,14 @@ func htmlResponse(statusCode int, body []byte) managementResponse {
 			"content-type": []string{resourceContentType},
 		},
 		Body: body,
+	}
+}
+
+func redirectResponse(location string) managementResponse {
+	return managementResponse{
+		StatusCode: http.StatusSeeOther,
+		Headers: http.Header{
+			"Location": []string{location},
+		},
 	}
 }

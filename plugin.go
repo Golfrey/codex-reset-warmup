@@ -21,6 +21,9 @@ const (
 	headerSecret         = "X-Codex-Reset-Warmup"
 	headerTargetAuthID   = "X-Codex-Reset-Warmup-Auth-Id"
 	resourcePath         = "/status"
+	resourceFullPath     = "/v0/resource/plugins/" + pluginName + resourcePath
+	managementWarmupPath = "/plugins/" + pluginName + "/warmup"
+	warmupActionPath     = "/v0/management" + managementWarmupPath
 	resourceContentType  = "text/html; charset=utf-8"
 
 	defaultIdleCheckIntervalMinutes = 120
@@ -45,6 +48,11 @@ func (s *pluginState) handleMethod(method string, request []byte) ([]byte, error
 		return s.pickAuth(request)
 	case pluginabi.MethodManagementRegister:
 		return okEnvelope(managementRegistration{
+			Routes: []managementRoute{{
+				Method:      "POST",
+				Path:        managementWarmupPath,
+				Description: "Runs a manual Codex reset warmup for one auth.",
+			}},
 			Resources: []managementResource{{
 				Path:        resourcePath,
 				Menu:        "Codex Reset Warmup",

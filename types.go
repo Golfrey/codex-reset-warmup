@@ -44,7 +44,14 @@ type registrationCapabilities struct {
 }
 
 type managementRegistration struct {
+	Routes    []managementRoute    `json:"routes,omitempty"`
 	Resources []managementResource `json:"resources,omitempty"`
+}
+
+type managementRoute struct {
+	Method      string `json:"Method"`
+	Path        string `json:"Path"`
+	Description string `json:"Description"`
 }
 
 type managementResource struct {
