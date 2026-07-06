@@ -1,4 +1,4 @@
-module github.com/router-for-me/CLIProxyAPI/v7/plugin/codex-reset-warmup
+module github.com/Golfrey/codex-reset-warmup
 
 go 1.26.0
 

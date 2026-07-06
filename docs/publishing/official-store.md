@@ -63,7 +63,7 @@ Each platform zip must contain one dynamic library at the zip root. The official
 This repo now includes:
 
 - `scripts/package-release.sh`, which builds the current platform with `go build -buildmode=c-shared`, writes a correctly named zip, and updates `dist/checksums.txt`.
-- `.github/workflows/release.yml`, which builds `linux/amd64`, `darwin/amd64`, and `darwin/arm64` release assets and publishes them to a GitHub Release.
+- `.github/workflows/release.yml`, which builds `linux/amd64`, `darwin/amd64`, and `darwin/arm64` release assets and publishes them to a GitHub Release. In CI it replaces the local CLIProxyAPI SDK development path with `github.com/router-for-me/CLIProxyAPI/v7@main`, because the plugin SDK packages used here are not available in the older `v7.0.0` module release.
 - `docs/publishing/registry-entry.json`, which is the current official-store registry-entry draft.
 - `.gitignore`, which excludes generated `dist/` files and C headers.
 
