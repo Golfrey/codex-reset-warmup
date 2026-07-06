@@ -23,7 +23,7 @@ func (s *pluginState) runWarmup(entry timerEntry, cfg pluginConfig) warmupResult
 		RanAt:     time.Now(),
 	}
 	authID := result.AuthID
-	if authID == "" {
+	if strings.TrimSpace(entry.AuthIndex) != "" {
 		runtimeAuth, errRuntime := s.getRuntimeAuth(entry.AuthIndex)
 		if errRuntime != nil {
 			result.Error = errRuntime.Error()
@@ -57,7 +57,9 @@ func (s *pluginState) runWarmup(entry timerEntry, cfg pluginConfig) warmupResult
 		return result
 	}
 	result.StatusCode = resp.StatusCode
-	s.scheduleFromWarmupResponse(entry, cfg, resp, result.RanAt)
+	responseEntry := entry
+	responseEntry.AuthID = authID
+	s.scheduleFromWarmupResponse(responseEntry, cfg, resp, result.RanAt)
 	if resp.StatusCode >= 400 {
 		result.Error = responseErrorSummary(resp.Body)
 	}

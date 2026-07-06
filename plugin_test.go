@@ -23,6 +23,7 @@ func (t *fakeTimer) Stop() bool {
 
 type fakeHost struct {
 	calls         []hostCall
+	runtimeAuth   pluginapi.HostAuthFileEntry
 	httpResponse  pluginapi.HTTPResponse
 	usageResponse pluginapi.HTTPResponse
 	httpError     error
@@ -44,6 +45,9 @@ func (h *fakeHost) Call(method string, payload any) (json.RawMessage, error) {
 			},
 		})
 	case "host.auth.get_runtime":
+		if h.runtimeAuth.ID != "" || h.runtimeAuth.AuthIndex != "" {
+			return json.Marshal(pluginapi.HostAuthGetRuntimeResponse{Auth: h.runtimeAuth})
+		}
 		return json.Marshal(pluginapi.HostAuthGetRuntimeResponse{
 			Auth: pluginapi.HostAuthFileEntry{ID: "auth-runtime", AuthIndex: "idx-1", Provider: "codex"},
 		})
@@ -225,6 +229,30 @@ func TestTimerClearsBeforeWarmup(t *testing.T) {
 	}
 	if result.StatusCode != http.StatusOK {
 		t.Fatalf("warmup result = %#v, want status 200", result)
+	}
+}
+
+func TestRunWarmupRefreshesRuntimeAuthID(t *testing.T) {
+	host := &fakeHost{
+		runtimeAuth: pluginapi.HostAuthFileEntry{ID: "auth-current", AuthIndex: "idx-1", Provider: "codex"},
+	}
+	state := newPluginState(host)
+	result := state.runWarmup(timerEntry{
+		AuthIndex: "idx-1",
+		AuthID:    "auth-stale",
+		Window:    "5h",
+	}, defaultConfig())
+	if result.StatusCode != http.StatusOK || result.AuthID != "auth-current" {
+		t.Fatalf("result = %#v, want current runtime auth and status 200", result)
+	}
+	var executeReq hostModelExecutionRequest
+	for _, call := range host.calls {
+		if call.method == "host.model.execute" {
+			executeReq = call.payload.(hostModelExecutionRequest)
+		}
+	}
+	if got := executeReq.Headers.Get(headerTargetAuthID); got != "auth-current" {
+		t.Fatalf("target auth header = %q, want auth-current", got)
 	}
 }
 
