@@ -829,11 +829,25 @@ func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 	if !strings.Contains(page, `method="post"`) || !strings.Contains(page, warmupActionPath) || !strings.Contains(page, `name="auth_index" value="idx-1"`) {
 		t.Fatalf("status page missing manual warmup POST form:\n%s", page)
 	}
+	if !strings.Contains(page, `<code>codex-a.json</code>`) {
+		t.Fatalf("status page missing code-styled auth name:\n%s", page)
+	}
 	if !strings.Contains(page, `<html data-theme="dark">`) || !strings.Contains(page, `name="theme" value="dark"`) || !strings.Contains(page, "prefers-color-scheme:dark") {
 		t.Fatalf("status page missing theme support:\n%s", page)
 	}
 	if strings.Contains(page, "action=warmup") {
 		t.Fatalf("status page still contains old GET warmup action:\n%s", page)
+	}
+}
+
+func TestFormatDisplayTime(t *testing.T) {
+	zone := time.FixedZone("TST", -5*60*60)
+	got := formatDisplayTime(time.Date(2026, time.July, 5, 23, 2, 27, 0, zone))
+	if got != "Jul 5, 2026 11:02:27 PM TST" {
+		t.Fatalf("formatDisplayTime() = %q", got)
+	}
+	if zero := formatDisplayTime(time.Time{}); zero != "" {
+		t.Fatalf("formatDisplayTime(zero) = %q, want empty", zero)
 	}
 }
 

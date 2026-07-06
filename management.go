@@ -210,7 +210,7 @@ func writeOperationalSummary(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	writeMetricCard(out, "Recent warmup health", health.label, health.detail, health.class)
 	nextIdle := "Not scheduled"
 	if !snapshot.idleNextAt.IsZero() {
-		nextIdle = snapshot.idleNextAt.Format(time.RFC3339)
+		nextIdle = formatDisplayTime(snapshot.idleNextAt)
 	}
 	writeMetricCard(out, "Next idle check", nextIdle, idleCheckDetail(snapshot), "neutral")
 	out.WriteString("</div></section>")
@@ -264,7 +264,7 @@ func recentWarmupHealth(results []warmupResult) warmupHealth {
 		return warmupHealth{label: "No data", class: "neutral", detail: "no warmup has run"}
 	}
 	latest := results[0]
-	detail := "latest ran at " + latest.RanAt.Format(time.RFC3339)
+	detail := "latest ran at " + formatDisplayTime(latest.RanAt)
 	if latest.Error != "" || latest.StatusCode < http.StatusOK || latest.StatusCode >= http.StatusMultipleChoices {
 		return warmupHealth{label: "Attention", class: "warn", detail: detail}
 	}
@@ -292,10 +292,10 @@ func writeRuntimeSettings(out *bytes.Buffer, snapshot statusPageSnapshot) {
 		writeDefinition(out, "Idle check running", "false")
 	}
 	if !snapshot.idleNextAt.IsZero() {
-		writeDefinition(out, "Next idle check", snapshot.idleNextAt.Format(time.RFC3339))
+		writeDefinition(out, "Next idle check", formatDisplayTime(snapshot.idleNextAt))
 	}
 	if !snapshot.idleLast.RanAt.IsZero() {
-		last := fmt.Sprintf("%s checked=%d skipped=%d failed=%d", snapshot.idleLast.RanAt.Format(time.RFC3339), snapshot.idleLast.Checked, snapshot.idleLast.Skipped, snapshot.idleLast.Failed)
+		last := fmt.Sprintf("%s checked=%d skipped=%d failed=%d", formatDisplayTime(snapshot.idleLast.RanAt), snapshot.idleLast.Checked, snapshot.idleLast.Skipped, snapshot.idleLast.Failed)
 		if snapshot.idleLast.ProbeScheduled > 0 {
 			last += fmt.Sprintf(" probe_scheduled=%d", snapshot.idleLast.ProbeScheduled)
 		}
@@ -327,7 +327,7 @@ func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEnt
 		authIndex := strings.TrimSpace(auth.AuthIndex)
 		out.WriteString("<tr>")
 		writeCodeCell(out, authIndex)
-		writeTableCell(out, auth.Name, "")
+		writeCodeCell(out, auth.Name)
 		writeTableCell(out, auth.Status, "")
 		out.WriteString("<td>")
 		if authIndex == "" {
@@ -360,7 +360,7 @@ func writeTimersTable(out *bytes.Buffer, timers []timerEntry) {
 		writeCodeCell(out, entry.AuthIndex)
 		writeCodeCell(out, entry.AuthID)
 		writeTableCell(out, entry.Window, "")
-		writeTableCell(out, entry.ResetAt.Format(time.RFC3339), "")
+		writeTableCell(out, formatDisplayTime(entry.ResetAt), "")
 		out.WriteString("</tr>")
 	}
 	out.WriteString("</tbody></table></section>")
@@ -375,7 +375,7 @@ func writeResultsTable(out *bytes.Buffer, results []warmupResult) {
 		out.WriteString("<tr>")
 		writeCodeCell(out, result.AuthIndex)
 		writeCodeCell(out, result.AuthID)
-		writeTableCell(out, result.RanAt.Format(time.RFC3339), "")
+		writeTableCell(out, formatDisplayTime(result.RanAt), "")
 		writeTableCell(out, strconv.Itoa(result.StatusCode), "")
 		writeTableCell(out, result.Error, "cell-error")
 		out.WriteString("</tr>")
@@ -387,6 +387,13 @@ func writeCodeCell(out *bytes.Buffer, value string) {
 	out.WriteString("<td><code>")
 	out.WriteString(html.EscapeString(value))
 	out.WriteString("</code></td>")
+}
+
+func formatDisplayTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format("Jan 2, 2006 3:04:05 PM MST")
 }
 
 func writeTableCell(out *bytes.Buffer, value string, class string) {
