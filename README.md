@@ -8,30 +8,51 @@ V1 intentionally does not call CPA `/v0/management/reset-quota`. Idle checks que
 
 ## Configuration
 
+For a store install, the plugin is designed to work with defaults. If you are
+enabling it by editing YAML manually, the plugin-specific config can be as small
+as:
+
+```yaml
+plugins:
+  configs:
+    codex-reset-warmup:
+      enabled: true
+```
+
+Only override settings when you need non-default behavior. For example:
+
 ```yaml
 plugins:
   configs:
     codex-reset-warmup:
       enabled: true
       warmup_model: gpt-5.4-mini
-      warmup_prompt: ping
-      warmup_stream: false
-      manual_mode: host_model
-      cpa_base_url: http://127.0.0.1:8318
-      cpa_api_key: ""
-      codex_base_url: https://chatgpt.com/backend-api/codex
-      idle_check_enabled: true
-      idle_check_mode: direct_codex
       idle_check_interval_minutes: 120
-      schedule_five_hour: true
-      schedule_weekly: true
 ```
+
+All plugin options are:
+
+| Option | Default | When to change it |
+| --- | --- | --- |
+| `enabled` | `true` | Set to `false` to keep the plugin installed but stop scheduling, idle checks, and warmups. |
+| `warmup_model` | `gpt-5.4-mini` | Use a different Codex-routable model for automatic and `host_model`/`http` warmup requests. |
+| `warmup_prompt` | `ping` | Change the tiny prompt sent by warmup requests. |
+| `warmup_stream` | `false` | Set to `true` to use `host.model.execute_stream` for warmups instead of non-streaming `host.model.execute`. |
+| `manual_mode` | `host_model` | Controls manual warmups from the Management Center: `host_model`, `http`, or `direct_codex`. |
+| `cpa_base_url` | `http://127.0.0.1:8318` | Only used when `manual_mode` or `idle_check_mode` is `http`; point it at the local CLIProxyAPI base URL. |
+| `cpa_api_key` | `""` | Required only for `http` mode, because that mode calls CLIProxyAPI's OpenAI-compatible endpoint. |
+| `codex_base_url` | `https://chatgpt.com/backend-api/codex` | Only used by `direct_codex` warmups; change it only if the Codex upstream base URL changes. |
+| `idle_check_enabled` | `true` | Set to `false` to disable the watchdog for Codex auths that do not currently have a reset timer. |
+| `idle_check_mode` | `direct_codex` | Fallback warmup mode for idle checks when the usage probe cannot find a reset boundary: `host_model`, `http`, or `direct_codex`. |
+| `idle_check_interval_minutes` | `120` | Controls how often the idle watchdog checks untimed Codex auths after the first startup check. |
+| `schedule_five_hour` | `true` | Set to `false` to ignore Codex 5-hour reset windows. |
+| `schedule_weekly` | `true` | Set to `false` to ignore Codex weekly reset windows. |
 
 If a timer already exists for an auth, later usage records for that auth are ignored until the timer fires or the plugin is reloaded.
 
 Auto timer warmups use `host.model.execute`. Manual warmups can use `host_model`, `http`, or `direct_codex`.
 
-`http` posts to the configured local CLIProxyAPI `/v1/chat/completions` endpoint with the plugin's private scheduler headers. `direct_codex` reads the selected auth JSON with `host.auth.get` and posts directly to the Codex `/responses` upstream, bypassing CPA priority-based auth selection.
+`host_model` is the default manual warmup mode. `http` posts to the configured local CLIProxyAPI `/v1/chat/completions` endpoint with the plugin's private scheduler headers and requires `cpa_api_key`. `direct_codex` reads the selected auth JSON with `host.auth.get` and posts directly to the Codex `/responses` upstream, bypassing CPA priority-based auth selection. The default idle check mode is `direct_codex`.
 
 The idle check is a watchdog for Codex auths that currently have no reset timer. The first idle check runs one minute after the plugin starts; after that, every `idle_check_interval_minutes`, it lists Codex auths and skips auths that already have timers. For untimed auths, it first queries `https://chatgpt.com/backend-api/wham/usage` directly and registers a timer from the earliest enabled future primary/5-hour or secondary/weekly reset boundary. If the probe fails or returns no eligible reset boundary, the idle check sends a warmup request with `idle_check_mode`.
 
