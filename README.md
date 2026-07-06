@@ -56,3 +56,7 @@ go test ./...
 go build -buildmode=c-shared -o /tmp/codex-reset-warmup.dylib .
 rm -f /tmp/codex-reset-warmup.h
 ```
+
+## Publishing
+
+See `docs/publishing/official-store.md` for the official CLIProxyAPI store publishing plan, release asset requirements, and the draft registry entry.
