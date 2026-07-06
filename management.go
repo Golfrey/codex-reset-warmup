@@ -192,6 +192,7 @@ const statusPageCSS = `
 	--accent: hsl(var(--primary, 217.2 91.2% 59.8%));
 	--accent-hover: hsl(var(--primary, 217.2 91.2% 53%));
 	--accent-text: hsl(var(--primary-foreground, 210 40% 98%));
+	--button-border: var(--accent-hover);
 	--ok: #067647;
 	--warn: hsl(var(--destructive, 0 84.2% 60.2%));
 	--code-bg: hsl(var(--muted, 210 40% 96.1%) / .58);
@@ -217,62 +218,66 @@ const statusPageCSS = `
 
 :root[data-theme="dark"] {
 	color-scheme: dark;
-	--panel: hsl(var(--card, 40 7% 9%) / .74);
-	--text: hsl(var(--foreground, 40 8% 88%));
-	--muted: hsl(var(--muted-foreground, 34 6% 58%));
-	--border: hsl(var(--border, 34 7% 17%));
-	--soft: hsl(var(--muted, 36 7% 13%) / .82);
-	--accent: hsl(var(--primary, 210 100% 67%));
-	--accent-hover: hsl(var(--primary, 210 100% 72%));
-	--accent-text: hsl(var(--primary-foreground, 0 0% 100%));
+	--bg: #151412;
+	--panel: #1d1b18;
+	--text: #e8e3dc;
+	--muted: #8f8a83;
+	--border: #302d29;
+	--soft: #24211e;
+	--accent: #292521;
+	--accent-hover: #34302c;
+	--accent-text: #eee9e2;
+	--button-border: #403b36;
 	--ok: #20c997;
 	--warn: #ff8a7a;
-	--code-bg: hsl(var(--muted, 36 7% 13%) / .72);
-	--notice-bg: rgba(6, 78, 59, .24);
+	--code-bg: #171512;
+	--notice-bg: #222a23;
 	--notice-border: rgba(32, 201, 151, .32);
 	--notice-text: #20c997;
 	--error-bg: rgba(122, 34, 24, .24);
 	--error-border: rgba(255, 138, 122, .32);
 	--error-text: #ffb4a8;
-	--badge-neutral-bg: hsl(var(--muted, 36 7% 13%) / .76);
+	--badge-neutral-bg: #24211e;
 	--badge-neutral-text: var(--muted);
 	--badge-neutral-border: var(--border);
-	--disabled-bg: hsl(var(--muted, 36 7% 13%) / .76);
+	--disabled-bg: #24211e;
 	--disabled-border: var(--border);
-	--disabled-text: hsl(var(--muted-foreground, 34 6% 58%) / .72);
+	--disabled-text: #706d68;
 }
 
 @media (prefers-color-scheme:dark) {
 	:root:not([data-theme="light"]) {
 		color-scheme: dark;
-		--panel: hsl(var(--card, 40 7% 9%) / .74);
-		--text: hsl(var(--foreground, 40 8% 88%));
-		--muted: hsl(var(--muted-foreground, 34 6% 58%));
-		--border: hsl(var(--border, 34 7% 17%));
-		--soft: hsl(var(--muted, 36 7% 13%) / .82);
-		--accent: hsl(var(--primary, 210 100% 67%));
-		--accent-hover: hsl(var(--primary, 210 100% 72%));
-		--accent-text: hsl(var(--primary-foreground, 0 0% 100%));
+		--bg: #151412;
+		--panel: #1d1b18;
+		--text: #e8e3dc;
+		--muted: #8f8a83;
+		--border: #302d29;
+		--soft: #24211e;
+		--accent: #292521;
+		--accent-hover: #34302c;
+		--accent-text: #eee9e2;
+		--button-border: #403b36;
 		--ok: #20c997;
 		--warn: #ff8a7a;
-		--code-bg: hsl(var(--muted, 36 7% 13%) / .72);
-		--notice-bg: rgba(6, 78, 59, .24);
+		--code-bg: #171512;
+		--notice-bg: #222a23;
 		--notice-border: rgba(32, 201, 151, .32);
 		--notice-text: #20c997;
 		--error-bg: rgba(122, 34, 24, .24);
 		--error-border: rgba(255, 138, 122, .32);
 		--error-text: #ffb4a8;
-		--badge-neutral-bg: hsl(var(--muted, 36 7% 13%) / .76);
+		--badge-neutral-bg: #24211e;
 		--badge-neutral-text: var(--muted);
 		--badge-neutral-border: var(--border);
-		--disabled-bg: hsl(var(--muted, 36 7% 13%) / .76);
+		--disabled-bg: #24211e;
 		--disabled-border: var(--border);
-		--disabled-text: hsl(var(--muted-foreground, 34 6% 58%) / .72);
+		--disabled-text: #706d68;
 	}
 }
 
 * { box-sizing: border-box; }
-html, body { background: transparent; }
+html, body { background: var(--bg); }
 body {
 	margin: 0;
 	color: var(--text);
@@ -303,7 +308,7 @@ code { background: var(--code-bg); border: 1px solid var(--code-border); border-
 .badge.warn { background: var(--error-bg); color: var(--error-text); border-color: var(--error-border); }
 .badge.neutral { background: var(--badge-neutral-bg); color: var(--badge-neutral-text); border-color: var(--badge-neutral-border); }
 .cell-error { color: var(--warn); font-weight: 650; }
-.button { appearance: none; border: 1px solid transparent; background: var(--accent); color: var(--accent-text); border-radius: 6px; padding: 7px 11px; font-weight: 700; cursor: pointer; }
+.button { appearance: none; border: 1px solid var(--button-border); background: var(--accent); color: var(--accent-text); border-radius: 6px; padding: 7px 11px; font-weight: 700; cursor: pointer; }
 .button:hover { background: var(--accent-hover); }
 .button:disabled { background: var(--disabled-bg); border-color: var(--disabled-border); color: var(--disabled-text); cursor: not-allowed; }
 .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 0; }
