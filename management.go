@@ -180,6 +180,146 @@ func (s *pluginState) statusPageSnapshot() statusPageSnapshot {
 	return snapshot
 }
 
+const statusPageCSS = `
+:root {
+	color-scheme: light dark;
+	--bg: transparent;
+	--panel: hsl(var(--card, 0 0% 100%) / .82);
+	--text: hsl(var(--foreground, 222.2 84% 4.9%));
+	--muted: hsl(var(--muted-foreground, 215.4 16.3% 46.9%));
+	--border: hsl(var(--border, 214.3 31.8% 91.4%));
+	--soft: hsl(var(--muted, 210 40% 96.1%) / .72);
+	--accent: hsl(var(--primary, 217.2 91.2% 59.8%));
+	--accent-hover: hsl(var(--primary, 217.2 91.2% 53%));
+	--accent-text: hsl(var(--primary-foreground, 210 40% 98%));
+	--ok: #067647;
+	--warn: hsl(var(--destructive, 0 84.2% 60.2%));
+	--code-bg: hsl(var(--muted, 210 40% 96.1%) / .58);
+	--code-border: var(--border);
+	--notice-bg: #ecfdf3;
+	--notice-border: #abefc6;
+	--notice-text: #067647;
+	--error-bg: #fef3f2;
+	--error-border: #fecdca;
+	--error-text: #b42318;
+	--badge-neutral-bg: hsl(var(--muted, 210 40% 96.1%) / .78);
+	--badge-neutral-text: var(--muted);
+	--badge-neutral-border: var(--border);
+	--disabled-bg: hsl(var(--muted, 210 40% 96.1%));
+	--disabled-border: var(--border);
+	--disabled-text: var(--muted);
+	--shadow: none;
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--panel: hsl(var(--card, 40 7% 9%) / .74);
+	--text: hsl(var(--foreground, 40 8% 88%));
+	--muted: hsl(var(--muted-foreground, 34 6% 58%));
+	--border: hsl(var(--border, 34 7% 17%));
+	--soft: hsl(var(--muted, 36 7% 13%) / .82);
+	--accent: hsl(var(--primary, 210 100% 67%));
+	--accent-hover: hsl(var(--primary, 210 100% 72%));
+	--accent-text: hsl(var(--primary-foreground, 0 0% 100%));
+	--ok: #20c997;
+	--warn: #ff8a7a;
+	--code-bg: hsl(var(--muted, 36 7% 13%) / .72);
+	--notice-bg: rgba(6, 78, 59, .24);
+	--notice-border: rgba(32, 201, 151, .32);
+	--notice-text: #20c997;
+	--error-bg: rgba(122, 34, 24, .24);
+	--error-border: rgba(255, 138, 122, .32);
+	--error-text: #ffb4a8;
+	--badge-neutral-bg: hsl(var(--muted, 36 7% 13%) / .76);
+	--badge-neutral-text: var(--muted);
+	--badge-neutral-border: var(--border);
+	--disabled-bg: hsl(var(--muted, 36 7% 13%) / .76);
+	--disabled-border: var(--border);
+	--disabled-text: hsl(var(--muted-foreground, 34 6% 58%) / .72);
+}
+
+@media (prefers-color-scheme:dark) {
+	:root:not([data-theme="light"]) {
+		color-scheme: dark;
+		--panel: hsl(var(--card, 40 7% 9%) / .74);
+		--text: hsl(var(--foreground, 40 8% 88%));
+		--muted: hsl(var(--muted-foreground, 34 6% 58%));
+		--border: hsl(var(--border, 34 7% 17%));
+		--soft: hsl(var(--muted, 36 7% 13%) / .82);
+		--accent: hsl(var(--primary, 210 100% 67%));
+		--accent-hover: hsl(var(--primary, 210 100% 72%));
+		--accent-text: hsl(var(--primary-foreground, 0 0% 100%));
+		--ok: #20c997;
+		--warn: #ff8a7a;
+		--code-bg: hsl(var(--muted, 36 7% 13%) / .72);
+		--notice-bg: rgba(6, 78, 59, .24);
+		--notice-border: rgba(32, 201, 151, .32);
+		--notice-text: #20c997;
+		--error-bg: rgba(122, 34, 24, .24);
+		--error-border: rgba(255, 138, 122, .32);
+		--error-text: #ffb4a8;
+		--badge-neutral-bg: hsl(var(--muted, 36 7% 13%) / .76);
+		--badge-neutral-text: var(--muted);
+		--badge-neutral-border: var(--border);
+		--disabled-bg: hsl(var(--muted, 36 7% 13%) / .76);
+		--disabled-border: var(--border);
+		--disabled-text: hsl(var(--muted-foreground, 34 6% 58%) / .72);
+	}
+}
+
+* { box-sizing: border-box; }
+html, body { background: transparent; }
+body {
+	margin: 0;
+	color: var(--text);
+	font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 42px; }
+.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.eyebrow { margin: 0 0 4px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+h1 { margin: 0; font-size: 28px; line-height: 1.2; font-weight: 750; letter-spacing: 0; }
+h2 { margin: 0 0 12px; font-size: 17px; line-height: 1.3; letter-spacing: 0; }
+.section { margin-top: 18px; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.card, .panel, table { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.card, .panel { padding: 16px; }
+.metric-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+.metric-value { margin-top: 8px; font-size: 22px; font-weight: 760; }
+.metric-detail { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.notice, .error { border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; border: 1px solid; }
+.notice { background: var(--notice-bg); border-color: var(--notice-border); color: var(--notice-text); }
+.error { background: var(--error-bg); border-color: var(--error-border); color: var(--error-text); }
+table { border-collapse: separate; border-spacing: 0; width: 100%; overflow: hidden; }
+th, td { padding: 11px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { background: var(--soft); color: var(--muted); font-size: 12px; font-weight: 700; }
+tr:last-child td { border-bottom: 0; }
+code { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 5px; padding: 2px 5px; font-size: 12px; }
+.badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 12px; font-weight: 700; border: 1px solid transparent; }
+.badge.ok { background: var(--notice-bg); color: var(--notice-text); border-color: var(--notice-border); }
+.badge.warn { background: var(--error-bg); color: var(--error-text); border-color: var(--error-border); }
+.badge.neutral { background: var(--badge-neutral-bg); color: var(--badge-neutral-text); border-color: var(--badge-neutral-border); }
+.cell-error { color: var(--warn); font-weight: 650; }
+.button { appearance: none; border: 1px solid transparent; background: var(--accent); color: var(--accent-text); border-radius: 6px; padding: 7px 11px; font-weight: 700; cursor: pointer; }
+.button:hover { background: var(--accent-hover); }
+.button:disabled { background: var(--disabled-bg); border-color: var(--disabled-border); color: var(--disabled-text); cursor: not-allowed; }
+.settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 0; }
+.settings dt { color: var(--muted); font-size: 12px; font-weight: 650; }
+.settings dd { margin: 3px 0 0; font-weight: 650; word-break: break-word; }
+@media (max-width: 900px) {
+	.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.settings { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+	.page { width: min(100% - 24px, 1180px); padding-top: 18px; }
+	.topbar { display: block; }
+	.grid { grid-template-columns: 1fr; }
+	table { display: block; overflow-x: auto; white-space: nowrap; }
+}`
+
 func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string, theme string) {
 	out.WriteString("<!doctype html><html")
 	if theme = normalizeTheme(theme); theme != "" {
@@ -188,7 +328,9 @@ func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string, 
 		out.WriteString("\"")
 	}
 	out.WriteString("><head><meta charset=\"utf-8\"><title>Codex Reset Warmup</title>")
-	out.WriteString("<style>:root{color-scheme:light dark;--bg:#f7f8fb;--panel:#fff;--text:#17202a;--muted:#667085;--border:#d8dee4;--soft:#f1f4f8;--accent:#2563eb;--accent-hover:#1d4ed8;--ok:#087f5b;--warn:#b42318;--code-bg:#f6f8fa;--code-border:#e5e7eb;--notice-bg:#ecfdf3;--notice-border:#abefc6;--notice-text:#067647;--error-bg:#fef3f2;--error-border:#fecdca;--error-text:#b42318;--badge-neutral-bg:#f2f4f7;--badge-neutral-text:#475467;--badge-neutral-border:#e4e7ec;--disabled-bg:#e4e7ec;--disabled-border:#d0d5dd;--disabled-text:#98a2b3;--shadow:0 1px 2px rgba(16,24,40,.04)}:root[data-theme=\"light\"]{color-scheme:light}:root[data-theme=\"dark\"]{color-scheme:dark;--bg:#0f172a;--panel:#111827;--text:#e5e7eb;--muted:#9ca3af;--border:#2f3a4f;--soft:#1f2937;--accent:#60a5fa;--accent-hover:#93c5fd;--ok:#34d399;--warn:#f87171;--code-bg:#0b1220;--code-border:#334155;--notice-bg:#052e1c;--notice-border:#166534;--notice-text:#86efac;--error-bg:#3f1212;--error-border:#7f1d1d;--error-text:#fca5a5;--badge-neutral-bg:#1f2937;--badge-neutral-text:#d1d5db;--badge-neutral-border:#374151;--disabled-bg:#1f2937;--disabled-border:#374151;--disabled-text:#6b7280;--shadow:0 1px 2px rgba(0,0,0,.28)}@media (prefers-color-scheme:dark){:root:not([data-theme=\"light\"]){color-scheme:dark;--bg:#0f172a;--panel:#111827;--text:#e5e7eb;--muted:#9ca3af;--border:#2f3a4f;--soft:#1f2937;--accent:#60a5fa;--accent-hover:#93c5fd;--ok:#34d399;--warn:#f87171;--code-bg:#0b1220;--code-border:#334155;--notice-bg:#052e1c;--notice-border:#166534;--notice-text:#86efac;--error-bg:#3f1212;--error-border:#7f1d1d;--error-text:#fca5a5;--badge-neutral-bg:#1f2937;--badge-neutral-text:#d1d5db;--badge-neutral-border:#374151;--disabled-bg:#1f2937;--disabled-border:#374151;--disabled-text:#6b7280;--shadow:0 1px 2px rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.page{width:min(1180px,calc(100% - 40px));margin:0 auto;padding:28px 0 42px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}.eyebrow{margin:0 0 4px;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}h1{margin:0;font-size:28px;line-height:1.2;font-weight:750;letter-spacing:0}h2{margin:0 0 12px;font-size:17px;line-height:1.3;letter-spacing:0}.section{margin-top:18px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:var(--shadow)}.metric-label{color:var(--muted);font-size:12px;font-weight:650}.metric-value{margin-top:8px;font-size:22px;font-weight:760}.metric-detail{margin-top:6px;color:var(--muted);font-size:13px}.notice,.error{border-radius:8px;padding:10px 12px;margin:0 0 12px;border:1px solid}.notice{background:var(--notice-bg);border-color:var(--notice-border);color:var(--notice-text)}.error{background:var(--error-bg);border-color:var(--error-border);color:var(--error-text)}.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:var(--shadow)}table{border-collapse:separate;border-spacing:0;width:100%;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--panel)}th,td{padding:11px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}th{background:var(--soft);color:var(--muted);font-size:12px;font-weight:700}tr:last-child td{border-bottom:0}code{background:var(--code-bg);border:1px solid var(--code-border);border-radius:5px;padding:2px 5px;font-size:12px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;border:1px solid transparent}.badge.ok{background:var(--notice-bg);color:var(--notice-text);border-color:var(--notice-border)}.badge.warn{background:var(--error-bg);color:var(--error-text);border-color:var(--error-border)}.badge.neutral{background:var(--badge-neutral-bg);color:var(--badge-neutral-text);border-color:var(--badge-neutral-border)}.cell-error{color:var(--warn);font-weight:650}.button{appearance:none;border:1px solid var(--accent-hover);background:var(--accent);color:#fff;border-radius:6px;padding:7px 11px;font-weight:700;cursor:pointer}.button:hover{background:var(--accent-hover)}.button:disabled{background:var(--disabled-bg);border-color:var(--disabled-border);color:var(--disabled-text);cursor:not-allowed}.settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}.settings dt{color:var(--muted);font-size:12px;font-weight:650}.settings dd{margin:3px 0 0;font-weight:650;word-break:break-word}@media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.settings{grid-template-columns:1fr}}@media (max-width:620px){.page{width:min(100% - 24px,1180px);padding-top:18px}.topbar{display:block}.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:nowrap}}</style>")
+	out.WriteString("<style>")
+	out.WriteString(statusPageCSS)
+	out.WriteString("</style>")
 	out.WriteString("</head><body><main class=\"page\"><header class=\"topbar\"><div><p class=\"eyebrow\">Plugin</p><h1>Codex Reset Warmup</h1></div></header>")
 	if strings.TrimSpace(notice) != "" {
 		out.WriteString("<div class=\"notice\" role=\"status\">")
