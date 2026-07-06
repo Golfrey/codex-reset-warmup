@@ -111,11 +111,15 @@ type warmupResult struct {
 }
 
 type idleCheckResult struct {
-	RanAt   time.Time `json:"ran_at"`
-	Checked int       `json:"checked"`
-	Skipped int       `json:"skipped"`
-	Failed  int       `json:"failed"`
-	Error   string    `json:"error,omitempty"`
+	RanAt           time.Time `json:"ran_at"`
+	Checked         int       `json:"checked"`
+	Skipped         int       `json:"skipped"`
+	Failed          int       `json:"failed"`
+	ProbeScheduled  int       `json:"probe_scheduled,omitempty"`
+	ProbeNoBoundary int       `json:"probe_no_boundary,omitempty"`
+	ProbeFailed     int       `json:"probe_failed,omitempty"`
+	Warmed          int       `json:"warmed,omitempty"`
+	Error           string    `json:"error,omitempty"`
 }
 
 // resetBoundary is the normalized answer to "when should this auth wake up again?"

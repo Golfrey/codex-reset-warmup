@@ -57,7 +57,7 @@ func (s *pluginState) fireIdleCheck() {
 	s.mu.Unlock()
 }
 
-// runIdleCheck warms auths with no active timer so silent accounts can still reveal reset headers.
+// runIdleCheck first probes untimed auths for reset data, then warms only when probing cannot schedule.
 func (s *pluginState) runIdleCheck(cfg pluginConfig) idleCheckResult {
 	result := idleCheckResult{RanAt: time.Now()}
 	auths, errAuths := s.listCodexAuths()
@@ -74,6 +74,36 @@ func (s *pluginState) runIdleCheck(cfg pluginConfig) idleCheckResult {
 			result.Skipped++
 			continue
 		}
+		now := time.Now()
+		boundary, probed, errProbe := s.probeCodexUsage(auth, cfg, now)
+		if errProbe != nil {
+			result.ProbeFailed++
+			s.logHost("warn", "codex usage probe failed; falling back to warmup", map[string]any{
+				"auth_index": authIndex,
+				"auth_id":    strings.TrimSpace(auth.ID),
+				"error":      errProbe.Error(),
+			})
+		} else if probed {
+			if s.registerTimer(boundary, now) {
+				result.Checked++
+				result.ProbeScheduled++
+				s.logHost("info", "codex usage probe scheduled reset timer", map[string]any{
+					"auth_index": authIndex,
+					"auth_id":    strings.TrimSpace(boundary.AuthID),
+					"window":     boundary.Window,
+					"reset_at":   boundary.ResetAt.Format(time.RFC3339),
+				})
+				continue
+			}
+			result.Skipped++
+			continue
+		} else {
+			result.ProbeNoBoundary++
+			s.logHost("info", "codex usage probe found no eligible reset boundary; falling back to warmup", map[string]any{
+				"auth_index": authIndex,
+				"auth_id":    strings.TrimSpace(auth.ID),
+			})
+		}
 		entry := timerEntry{
 			AuthIndex: authIndex,
 			AuthID:    strings.TrimSpace(auth.ID),
@@ -84,6 +114,7 @@ func (s *pluginState) runIdleCheck(cfg pluginConfig) idleCheckResult {
 		s.results[authIndex] = warmup
 		s.mu.Unlock()
 		result.Checked++
+		result.Warmed++
 		if warmup.Error != "" {
 			result.Failed++
 		}

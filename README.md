@@ -4,7 +4,7 @@ Warmup-only Codex reset scheduler for CLIProxyAPI.
 
 This plugin observes Codex `usage.handle` records, detects 5-hour and weekly reset boundaries from CPA-provided response headers or `usage_limit_reached` failure bodies, and registers one in-memory timer per auth. When the timer fires, it sends a small warmup request through `host.model.execute`.
 
-V1 intentionally does not call CPA `/v0/management/reset-quota` and does not query ChatGPT `wham/usage`. Auto scheduling only uses sanitized runtime auth identity from `usage.handle` or `host.auth.get_runtime`; manual `direct_codex` mode intentionally uses `host.auth.get` for the selected auth.
+V1 intentionally does not call CPA `/v0/management/reset-quota`. Idle checks query ChatGPT `wham/usage` directly with host-provided Codex auth material before falling back to warmup. Manual `direct_codex` mode intentionally uses `host.auth.get` for the selected auth.
 
 ## Configuration
 
@@ -33,7 +33,9 @@ Auto timer warmups use `host.model.execute`. Manual warmups can use `host_model`
 
 `http` posts to the configured local CLIProxyAPI `/v1/chat/completions` endpoint with the plugin's private scheduler headers. `direct_codex` reads the selected auth JSON with `host.auth.get` and posts directly to the Codex `/responses` upstream, bypassing CPA priority-based auth selection.
 
-The idle check is a watchdog for auths that currently have no reset timer. The first idle check runs one minute after the plugin starts; after that, every `idle_check_interval_minutes`, it lists Codex auths, skips auths that already have timers, and sends a warmup/check request for the remaining auths. In `direct_codex` mode, the response is parsed the same way as manual direct warmup, so reset headers or `usage_limit_reached` bodies can register the next normal reset timer.
+The idle check is a watchdog for Codex auths that currently have no reset timer. The first idle check runs one minute after the plugin starts; after that, every `idle_check_interval_minutes`, it lists Codex auths and skips auths that already have timers. For untimed auths, it first queries `https://chatgpt.com/backend-api/wham/usage` directly and registers a timer from the earliest enabled future primary/5-hour or secondary/weekly reset boundary. If the probe fails or returns no eligible reset boundary, the idle check sends a warmup request with `idle_check_mode`.
+
+Warmup responses from timer fires, manual warmups, and idle-check fallbacks are parsed for reset information when headers or failure bodies are available, so a warmup can immediately register the next timer.
 
 ## Code Layout
 
@@ -41,7 +43,7 @@ The plugin implementation is split by responsibility so each file has one main j
 
 - `plugin.go` contains shared constants and the host method dispatcher.
 - `state.go`, `types.go`, and `config.go` define in-memory state, message shapes, and config normalization.
-- `usage.go`, `reset_parse.go`, and `idle_check.go` turn usage/reset clues into scheduled warmup timers.
+- `usage.go`, `usage_probe.go`, `reset_parse.go`, and `idle_check.go` turn usage/reset clues into scheduled warmup timers.
 - `warmup.go`, `auth.go`, and `scheduler.go` run warmups, fetch auth material, and pin warmup requests to the intended auth.
 - `management.go`, `registration.go`, and `envelope.go` handle the management page, plugin registration, and ABI response envelopes.
 

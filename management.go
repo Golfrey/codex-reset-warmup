@@ -296,6 +296,18 @@ func writeRuntimeSettings(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	}
 	if !snapshot.idleLast.RanAt.IsZero() {
 		last := fmt.Sprintf("%s checked=%d skipped=%d failed=%d", snapshot.idleLast.RanAt.Format(time.RFC3339), snapshot.idleLast.Checked, snapshot.idleLast.Skipped, snapshot.idleLast.Failed)
+		if snapshot.idleLast.ProbeScheduled > 0 {
+			last += fmt.Sprintf(" probe_scheduled=%d", snapshot.idleLast.ProbeScheduled)
+		}
+		if snapshot.idleLast.ProbeNoBoundary > 0 {
+			last += fmt.Sprintf(" probe_no_boundary=%d", snapshot.idleLast.ProbeNoBoundary)
+		}
+		if snapshot.idleLast.ProbeFailed > 0 {
+			last += fmt.Sprintf(" probe_failed=%d", snapshot.idleLast.ProbeFailed)
+		}
+		if snapshot.idleLast.Warmed > 0 {
+			last += fmt.Sprintf(" warmed=%d", snapshot.idleLast.Warmed)
+		}
 		if snapshot.idleLast.Error != "" {
 			last += " error=" + snapshot.idleLast.Error
 		}

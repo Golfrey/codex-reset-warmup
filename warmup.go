@@ -57,6 +57,7 @@ func (s *pluginState) runWarmup(entry timerEntry, cfg pluginConfig) warmupResult
 		return result
 	}
 	result.StatusCode = resp.StatusCode
+	s.scheduleFromWarmupResponse(entry, cfg, resp, result.RanAt)
 	if resp.StatusCode >= 400 {
 		result.Error = responseErrorSummary(resp.Body)
 	}
@@ -191,6 +192,7 @@ func (s *pluginState) runManualHTTPWarmup(entry timerEntry, cfg pluginConfig) wa
 		return result
 	}
 	result.StatusCode = resp.StatusCode
+	s.scheduleFromWarmupResponse(entry, cfg, resp, result.RanAt)
 	s.logWarmupResult("info", "codex reset warmup completed", cfg, result)
 	return result
 }

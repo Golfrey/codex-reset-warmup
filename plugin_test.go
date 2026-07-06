@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -21,8 +22,10 @@ func (t *fakeTimer) Stop() bool {
 }
 
 type fakeHost struct {
-	calls        []hostCall
-	httpResponse pluginapi.HTTPResponse
+	calls         []hostCall
+	httpResponse  pluginapi.HTTPResponse
+	usageResponse pluginapi.HTTPResponse
+	httpError     error
 }
 
 type hostCall struct {
@@ -48,15 +51,28 @@ func (h *fakeHost) Call(method string, payload any) (json.RawMessage, error) {
 		return json.Marshal(pluginapi.HostAuthGetResponse{
 			AuthIndex: "idx-1",
 			Name:      "codex-a.json",
-			JSON:      json.RawMessage(`{"type":"codex","access_token":"codex-token","base_url":"https://codex.example.test/backend-api/codex"}`),
+			JSON:      json.RawMessage(`{"type":"codex","access_token":"codex-token","base_url":"https://codex.example.test/backend-api/codex","account_id":"acct-1"}`),
 		})
 	case "host.model.execute":
+		if h.httpResponse.StatusCode > 0 {
+			return json.Marshal(pluginapi.HostModelExecutionResponse{
+				StatusCode: h.httpResponse.StatusCode,
+				Headers:    h.httpResponse.Headers,
+				Body:       h.httpResponse.Body,
+			})
+		}
 		return json.Marshal(pluginapi.HostModelExecutionResponse{StatusCode: http.StatusOK})
 	case "host.http.do":
+		if h.httpError != nil {
+			return nil, h.httpError
+		}
+		if req, ok := payload.(pluginapi.HTTPRequest); ok && strings.Contains(req.URL, "wham/usage") && h.usageResponse.StatusCode > 0 {
+			return json.Marshal(h.usageResponse)
+		}
+		if h.httpResponse.StatusCode > 0 {
+			return json.Marshal(h.httpResponse)
+		}
 		if req, ok := payload.(pluginapi.HTTPRequest); ok && strings.Contains(req.URL, "codex.example.test") {
-			if h.httpResponse.StatusCode > 0 {
-				return json.Marshal(h.httpResponse)
-			}
 			return json.Marshal(pluginapi.HTTPResponse{StatusCode: http.StatusOK})
 		}
 		return json.Marshal(pluginapi.HTTPResponse{StatusCode: http.StatusTooManyRequests})
@@ -498,6 +514,29 @@ func TestRunManualWarmupDirectCodexSchedulesFromUsageLimitResponse(t *testing.T)
 	}
 }
 
+func TestParseCodexUsageProbeResetUsesEarliestEligibleWindow(t *testing.T) {
+	now := time.Unix(1000, 0)
+	body := []byte(`{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":120},"secondary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_at":1600}}}`)
+	got, ok := parseCodexUsageProbeReset(body, now, defaultConfig())
+	if !ok {
+		t.Fatal("parseCodexUsageProbeReset() ok = false")
+	}
+	if got.Window != "5h" || !got.ResetAt.Equal(now.Add(120*time.Second)) {
+		t.Fatalf("boundary = %#v, want 5h after 120 seconds", got)
+	}
+}
+
+func TestParseCodexUsageProbeResetIgnoresDisabledWindows(t *testing.T) {
+	now := time.Unix(1000, 0)
+	cfg := defaultConfig()
+	cfg.ScheduleFiveHour = false
+	cfg.ScheduleWeekly = false
+	body := []byte(`{"rate_limit":{"primary_window":{"limit_window_seconds":18000,"reset_at":2000},"secondary_window":{"limit_window_seconds":604800,"reset_at":3000}}}`)
+	if got, ok := parseCodexUsageProbeReset(body, now, cfg); ok {
+		t.Fatalf("parseCodexUsageProbeReset() = %#v, want no eligible boundary", got)
+	}
+}
+
 func TestIdleCheckSkipsAuthWithExistingTimer(t *testing.T) {
 	host := &fakeHost{}
 	state := newPluginState(host)
@@ -518,8 +557,93 @@ func TestIdleCheckSkipsAuthWithExistingTimer(t *testing.T) {
 	}
 }
 
-func TestIdleCheckDirectCodexSchedulesWhenNoTimer(t *testing.T) {
+func TestIdleCheckProbeSchedulesWhenNoTimer(t *testing.T) {
 	host := &fakeHost{
+		usageResponse: pluginapi.HTTPResponse{
+			StatusCode: http.StatusOK,
+			Body:       []byte(`{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":120}}}`),
+		},
+	}
+	state := newPluginState(host)
+	var timer *fakeTimer
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		timer = &fakeTimer{fire: f}
+		return timer
+	}
+	state.mu.Lock()
+	state.cfg.IdleCheckMode = "direct_codex"
+	cfg := state.cfg
+	state.mu.Unlock()
+
+	result := state.runIdleCheck(cfg)
+	if result.Checked != 1 || result.Skipped != 0 || result.Failed != 0 || result.ProbeScheduled != 1 || result.Warmed != 0 {
+		t.Fatalf("idle check result = %#v, want one checked probe-scheduled auth", result)
+	}
+	if timer == nil {
+		t.Fatal("timer was not created")
+	}
+	state.mu.Lock()
+	entry := state.timers["idx-1"]
+	_, stored := state.results["idx-1"]
+	state.mu.Unlock()
+	if entry == nil || entry.Window != "5h" || entry.AuthID != "auth-runtime" {
+		t.Fatalf("timer entry = %#v, want 5h for auth-runtime", entry)
+	}
+	if stored {
+		t.Fatal("probe result was stored as warmup result")
+	}
+	for _, call := range host.calls {
+		if call.method == "host.http.do" {
+			req, ok := call.payload.(pluginapi.HTTPRequest)
+			if !ok {
+				t.Fatalf("host.http.do payload = %T, want pluginapi.HTTPRequest", call.payload)
+			}
+			if req.URL == codexUsageProbeURL {
+				if req.Method != http.MethodGet || req.Headers.Get("User-Agent") != codexUsageProbeUserAgent || req.Headers.Get("Chatgpt-Account-Id") != "acct-1" {
+					t.Fatalf("usage probe request = %#v, want GET with Codex CLI headers", req)
+				}
+			}
+		}
+		if call.method == "host.model.execute" {
+			t.Fatalf("idle check warmed despite successful probe; calls = %#v", host.calls)
+		}
+	}
+}
+
+func TestIdleCheckProbeFailureFallsBackToWarmup(t *testing.T) {
+	host := &fakeHost{
+		httpError: errors.New("probe unavailable"),
+	}
+	state := newPluginState(host)
+	var timer *fakeTimer
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		timer = &fakeTimer{fire: f}
+		return timer
+	}
+	state.mu.Lock()
+	state.cfg.IdleCheckMode = "host_model"
+	state.cfg.WarmupModel = "gpt-5.4-mini"
+	cfg := state.cfg
+	state.mu.Unlock()
+
+	result := state.runIdleCheck(cfg)
+	if result.Checked != 1 || result.Skipped != 0 || result.Failed != 0 || result.ProbeFailed != 1 || result.Warmed != 1 {
+		t.Fatalf("idle check result = %#v, want probe failure with successful fallback warmup", result)
+	}
+	state.mu.Lock()
+	stored := state.results["idx-1"]
+	state.mu.Unlock()
+	if stored.StatusCode != http.StatusOK || stored.Error != "" {
+		t.Fatalf("stored result = %#v, want successful fallback warmup", stored)
+	}
+}
+
+func TestIdleCheckProbeWithoutBoundaryFallsBackToWarmupAndSchedulesFromResponse(t *testing.T) {
+	host := &fakeHost{
+		usageResponse: pluginapi.HTTPResponse{
+			StatusCode: http.StatusOK,
+			Body:       []byte(`{"rate_limit":{"allowed":true,"limit_reached":false}}`),
+		},
 		httpResponse: pluginapi.HTTPResponse{
 			StatusCode: http.StatusTooManyRequests,
 			Body:       []byte(`{"error":{"type":"usage_limit_reached","message":"limit","resets_in_seconds":120}}`),
@@ -538,8 +662,8 @@ func TestIdleCheckDirectCodexSchedulesWhenNoTimer(t *testing.T) {
 	state.mu.Unlock()
 
 	result := state.runIdleCheck(cfg)
-	if result.Checked != 1 || result.Skipped != 0 || result.Failed != 1 {
-		t.Fatalf("idle check result = %#v, want one checked failed warmup", result)
+	if result.Checked != 1 || result.Skipped != 0 || result.Failed != 1 || result.ProbeNoBoundary != 1 || result.Warmed != 1 {
+		t.Fatalf("idle check result = %#v, want no-boundary probe with failed fallback warmup", result)
 	}
 	if timer == nil {
 		t.Fatal("timer was not created")
@@ -553,6 +677,45 @@ func TestIdleCheckDirectCodexSchedulesWhenNoTimer(t *testing.T) {
 	}
 	if stored.StatusCode != http.StatusTooManyRequests || !strings.Contains(stored.Error, "limit") {
 		t.Fatalf("stored result = %#v, want 429 limit error", stored)
+	}
+}
+
+func TestTimerWarmupSchedulesSuccessorFromResponse(t *testing.T) {
+	host := &fakeHost{
+		httpResponse: pluginapi.HTTPResponse{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       []byte(`{"error":{"type":"usage_limit_reached","message":"limit","resets_in_seconds":120}}`),
+		},
+	}
+	state := newPluginState(host)
+	var timers []*fakeTimer
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		timer := &fakeTimer{fire: f}
+		timers = append(timers, timer)
+		return timer
+	}
+	now := time.Unix(1000, 0)
+	record := pluginapi.UsageRecord{
+		Provider:  "codex",
+		AuthIndex: "idx-1",
+		AuthID:    "auth-1",
+		ResponseHeaders: http.Header{
+			"X-Codex-Primary-Window-Minutes":      []string{"300"},
+			"X-Codex-Primary-Reset-After-Seconds": []string{"1"},
+		},
+	}
+	if !state.handleUsageRecord(record, now) {
+		t.Fatal("handleUsageRecord() did not register initial timer")
+	}
+	timers[0].fire()
+	if len(timers) != 2 {
+		t.Fatalf("timers created = %d, want successor timer", len(timers))
+	}
+	state.mu.Lock()
+	entry := state.timers["idx-1"]
+	state.mu.Unlock()
+	if entry == nil || entry.Window != "usage_limit_reached" {
+		t.Fatalf("timer entry = %#v, want successor usage_limit_reached timer", entry)
 	}
 }
 

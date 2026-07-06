@@ -31,3 +31,27 @@ _Avoid_: Account health, quota health
 **Operational Tab**:
 A Management Center Tab focused on current status, manual actions, timers, and recent results, without duplicating plugin configuration editing.
 _Avoid_: Config editor, settings page
+
+**Untimed Auth**:
+A Codex auth that does not currently have a Reset Timer registered.
+_Avoid_: Current without a trigger, unscheduled account
+
+**Usage Probe**:
+A lightweight check that attempts to learn current Codex reset information without consuming a Warmup Request.
+_Avoid_: Warmup, ping
+
+**Codex Usage Probe**:
+A Usage Probe that calls Codex's usage endpoint with the selected Codex auth to retrieve current reset-window information.
+_Avoid_: CPA management API call, synthetic warmup
+
+**Warmup Request**:
+A request sent to Codex to make an unused or unknown auth reveal reset information and stay ready for future use.
+_Avoid_: Usage probe, health check
+
+**Warmup Response**:
+The response data from a Warmup Request that may reveal reset-window information for scheduling the next Reset Timer.
+_Avoid_: Probe result, timer result
+
+**Reset Timer**:
+The scheduled callback for a Codex auth at a known reset boundary.
+_Avoid_: Trigger, alarm
