@@ -35,25 +35,27 @@ func (s *pluginState) handleManagement(raw []byte) ([]byte, error) {
 		return s.handleManualWarmupPost(req)
 	}
 
+	theme := themeFromQuery(req.Query)
 	notice, noticeError := noticeFromQuery(req.Query)
 	auths, errAuths := s.listCodexAuths()
 	if errAuths != nil {
 		noticeError = errAuths.Error()
 	}
-	return okEnvelope(htmlResponse(http.StatusOK, s.renderStatusPage(auths, notice, noticeError)))
+	return okEnvelope(htmlResponse(http.StatusOK, s.renderStatusPage(auths, notice, noticeError, theme)))
 }
 
 func (s *pluginState) handleManualWarmupPost(req managementRequest) ([]byte, error) {
 	authIndex := manualWarmupAuthIndex(req)
+	theme := themeFromRequest(req)
 	if authIndex == "" {
-		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", "", "", "auth_index is required")))
+		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", "", "", "auth_index is required", theme)))
 	}
 
 	result := s.runManualWarmup(authIndex)
 	if result.Error != "" {
-		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", result.AuthIndex, strconv.Itoa(result.StatusCode), result.Error)))
+		return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_error", result.AuthIndex, strconv.Itoa(result.StatusCode), result.Error, theme)))
 	}
-	return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_ok", result.AuthIndex, strconv.Itoa(result.StatusCode), "")))
+	return okEnvelope(redirectResponse(manualWarmupRedirect("warmup_ok", result.AuthIndex, strconv.Itoa(result.StatusCode), "", theme)))
 }
 
 func manualWarmupAuthIndex(req managementRequest) string {
@@ -67,7 +69,33 @@ func manualWarmupAuthIndex(req managementRequest) string {
 	return strings.TrimSpace(values.Get("auth_index"))
 }
 
-func manualWarmupRedirect(kind string, authIndex string, status string, message string) string {
+func themeFromRequest(req managementRequest) string {
+	if theme := themeFromQuery(req.Query); theme != "" {
+		return theme
+	}
+	values, errParse := url.ParseQuery(string(req.Body))
+	if errParse != nil {
+		return ""
+	}
+	return normalizeTheme(values.Get("theme"))
+}
+
+func themeFromQuery(query url.Values) string {
+	return normalizeTheme(query.Get("theme"))
+}
+
+func normalizeTheme(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "dark":
+		return "dark"
+	case "light":
+		return "light"
+	default:
+		return ""
+	}
+}
+
+func manualWarmupRedirect(kind string, authIndex string, status string, message string, theme string) string {
 	values := url.Values{}
 	if kind != "" {
 		values.Set("notice", kind)
@@ -80,6 +108,9 @@ func manualWarmupRedirect(kind string, authIndex string, status string, message 
 	}
 	if message != "" {
 		values.Set("message", message)
+	}
+	if theme = normalizeTheme(theme); theme != "" {
+		values.Set("theme", theme)
 	}
 	if encoded := values.Encode(); encoded != "" {
 		return resourceFullPath + "?" + encoded
@@ -103,13 +134,13 @@ func noticeFromQuery(query url.Values) (string, string) {
 }
 
 // renderStatusPage takes a snapshot first, then writes each visible section in order.
-func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, notice string, noticeError string) []byte {
+func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, notice string, noticeError string, theme string) []byte {
 	snapshot := s.statusPageSnapshot()
 
 	var out bytes.Buffer
-	writeStatusPageStart(&out, notice, noticeError)
+	writeStatusPageStart(&out, notice, noticeError, theme)
 	writeOperationalSummary(&out, snapshot)
-	writeManualWarmupTable(&out, auths)
+	writeManualWarmupTable(&out, auths, theme)
 	writeTimersTable(&out, snapshot.timers)
 	writeResultsTable(&out, snapshot.results)
 	writeRuntimeSettings(&out, snapshot)
@@ -149,9 +180,15 @@ func (s *pluginState) statusPageSnapshot() statusPageSnapshot {
 	return snapshot
 }
 
-func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string) {
-	out.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>Codex Reset Warmup</title>")
-	out.WriteString("<style>:root{color-scheme:light;--bg:#f7f8fb;--panel:#fff;--text:#17202a;--muted:#667085;--border:#d8dee4;--soft:#f1f4f8;--accent:#2563eb;--ok:#087f5b;--warn:#b42318;--chip:#eef2ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.page{width:min(1180px,calc(100% - 40px));margin:0 auto;padding:28px 0 42px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}.eyebrow{margin:0 0 4px;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}h1{margin:0;font-size:28px;line-height:1.2;font-weight:750;letter-spacing:0}h2{margin:0 0 12px;font-size:17px;line-height:1.3;letter-spacing:0}.section{margin-top:18px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}.metric-label{color:var(--muted);font-size:12px;font-weight:650}.metric-value{margin-top:8px;font-size:22px;font-weight:760}.metric-detail{margin-top:6px;color:var(--muted);font-size:13px}.notice,.error{border-radius:8px;padding:10px 12px;margin:0 0 12px;border:1px solid}.notice{background:#ecfdf3;border-color:#abefc6;color:#067647}.error{background:#fef3f2;border-color:#fecdca;color:#b42318}.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}table{border-collapse:separate;border-spacing:0;width:100%;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--panel)}th,td{padding:11px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}th{background:var(--soft);color:#344054;font-size:12px;font-weight:700}tr:last-child td{border-bottom:0}code{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:5px;padding:2px 5px;font-size:12px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;border:1px solid transparent}.badge.ok{background:#ecfdf3;color:#067647;border-color:#abefc6}.badge.warn{background:#fef3f2;color:#b42318;border-color:#fecdca}.badge.neutral{background:#f2f4f7;color:#475467;border-color:#e4e7ec}.cell-error{color:var(--warn);font-weight:650}.button{appearance:none;border:1px solid #1d4ed8;background:var(--accent);color:#fff;border-radius:6px;padding:7px 11px;font-weight:700;cursor:pointer}.button:hover{background:#1d4ed8}.button:disabled{background:#e4e7ec;border-color:#d0d5dd;color:#98a2b3;cursor:not-allowed}.settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}.settings dt{color:var(--muted);font-size:12px;font-weight:650}.settings dd{margin:3px 0 0;font-weight:650;word-break:break-word}@media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.settings{grid-template-columns:1fr}}@media (max-width:620px){.page{width:min(100% - 24px,1180px);padding-top:18px}.topbar{display:block}.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:nowrap}}</style>")
+func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string, theme string) {
+	out.WriteString("<!doctype html><html")
+	if theme = normalizeTheme(theme); theme != "" {
+		out.WriteString(" data-theme=\"")
+		out.WriteString(html.EscapeString(theme))
+		out.WriteString("\"")
+	}
+	out.WriteString("><head><meta charset=\"utf-8\"><title>Codex Reset Warmup</title>")
+	out.WriteString("<style>:root{color-scheme:light dark;--bg:#f7f8fb;--panel:#fff;--text:#17202a;--muted:#667085;--border:#d8dee4;--soft:#f1f4f8;--accent:#2563eb;--accent-hover:#1d4ed8;--ok:#087f5b;--warn:#b42318;--code-bg:#f6f8fa;--code-border:#e5e7eb;--notice-bg:#ecfdf3;--notice-border:#abefc6;--notice-text:#067647;--error-bg:#fef3f2;--error-border:#fecdca;--error-text:#b42318;--badge-neutral-bg:#f2f4f7;--badge-neutral-text:#475467;--badge-neutral-border:#e4e7ec;--disabled-bg:#e4e7ec;--disabled-border:#d0d5dd;--disabled-text:#98a2b3;--shadow:0 1px 2px rgba(16,24,40,.04)}:root[data-theme=\"light\"]{color-scheme:light}:root[data-theme=\"dark\"]{color-scheme:dark;--bg:#0f172a;--panel:#111827;--text:#e5e7eb;--muted:#9ca3af;--border:#2f3a4f;--soft:#1f2937;--accent:#60a5fa;--accent-hover:#93c5fd;--ok:#34d399;--warn:#f87171;--code-bg:#0b1220;--code-border:#334155;--notice-bg:#052e1c;--notice-border:#166534;--notice-text:#86efac;--error-bg:#3f1212;--error-border:#7f1d1d;--error-text:#fca5a5;--badge-neutral-bg:#1f2937;--badge-neutral-text:#d1d5db;--badge-neutral-border:#374151;--disabled-bg:#1f2937;--disabled-border:#374151;--disabled-text:#6b7280;--shadow:0 1px 2px rgba(0,0,0,.28)}@media (prefers-color-scheme:dark){:root:not([data-theme=\"light\"]){color-scheme:dark;--bg:#0f172a;--panel:#111827;--text:#e5e7eb;--muted:#9ca3af;--border:#2f3a4f;--soft:#1f2937;--accent:#60a5fa;--accent-hover:#93c5fd;--ok:#34d399;--warn:#f87171;--code-bg:#0b1220;--code-border:#334155;--notice-bg:#052e1c;--notice-border:#166534;--notice-text:#86efac;--error-bg:#3f1212;--error-border:#7f1d1d;--error-text:#fca5a5;--badge-neutral-bg:#1f2937;--badge-neutral-text:#d1d5db;--badge-neutral-border:#374151;--disabled-bg:#1f2937;--disabled-border:#374151;--disabled-text:#6b7280;--shadow:0 1px 2px rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.page{width:min(1180px,calc(100% - 40px));margin:0 auto;padding:28px 0 42px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:20px}.eyebrow{margin:0 0 4px;color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}h1{margin:0;font-size:28px;line-height:1.2;font-weight:750;letter-spacing:0}h2{margin:0 0 12px;font-size:17px;line-height:1.3;letter-spacing:0}.section{margin-top:18px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:var(--shadow)}.metric-label{color:var(--muted);font-size:12px;font-weight:650}.metric-value{margin-top:8px;font-size:22px;font-weight:760}.metric-detail{margin-top:6px;color:var(--muted);font-size:13px}.notice,.error{border-radius:8px;padding:10px 12px;margin:0 0 12px;border:1px solid}.notice{background:var(--notice-bg);border-color:var(--notice-border);color:var(--notice-text)}.error{background:var(--error-bg);border-color:var(--error-border);color:var(--error-text)}.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;box-shadow:var(--shadow)}table{border-collapse:separate;border-spacing:0;width:100%;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--panel)}th,td{padding:11px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}th{background:var(--soft);color:var(--muted);font-size:12px;font-weight:700}tr:last-child td{border-bottom:0}code{background:var(--code-bg);border:1px solid var(--code-border);border-radius:5px;padding:2px 5px;font-size:12px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;border:1px solid transparent}.badge.ok{background:var(--notice-bg);color:var(--notice-text);border-color:var(--notice-border)}.badge.warn{background:var(--error-bg);color:var(--error-text);border-color:var(--error-border)}.badge.neutral{background:var(--badge-neutral-bg);color:var(--badge-neutral-text);border-color:var(--badge-neutral-border)}.cell-error{color:var(--warn);font-weight:650}.button{appearance:none;border:1px solid var(--accent-hover);background:var(--accent);color:#fff;border-radius:6px;padding:7px 11px;font-weight:700;cursor:pointer}.button:hover{background:var(--accent-hover)}.button:disabled{background:var(--disabled-bg);border-color:var(--disabled-border);color:var(--disabled-text);cursor:not-allowed}.settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}.settings dt{color:var(--muted);font-size:12px;font-weight:650}.settings dd{margin:3px 0 0;font-weight:650;word-break:break-word}@media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.settings{grid-template-columns:1fr}}@media (max-width:620px){.page{width:min(100% - 24px,1180px);padding-top:18px}.topbar{display:block}.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:nowrap}}</style>")
 	out.WriteString("</head><body><main class=\"page\"><header class=\"topbar\"><div><p class=\"eyebrow\">Plugin</p><h1>Codex Reset Warmup</h1></div></header>")
 	if strings.TrimSpace(notice) != "" {
 		out.WriteString("<div class=\"notice\" role=\"status\">")
@@ -269,7 +306,7 @@ func writeRuntimeSettings(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	out.WriteString("</dl></div></section>")
 }
 
-func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEntry) {
+func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEntry, theme string) {
 	out.WriteString("<section class=\"section\"><h2>Manual Warmup</h2><table><thead><tr><th>Auth index</th><th>Name</th><th>Status</th><th>Action</th></tr></thead><tbody>")
 	if len(auths) == 0 {
 		out.WriteString("<tr><td colspan=\"4\">No Codex auths found.</td></tr>")
@@ -288,7 +325,13 @@ func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEnt
 			out.WriteString(html.EscapeString(warmupActionPath))
 			out.WriteString("\"><input type=\"hidden\" name=\"auth_index\" value=\"")
 			out.WriteString(html.EscapeString(authIndex))
-			out.WriteString("\"><button class=\"button\" type=\"submit\">Run warmup</button></form>")
+			out.WriteString("\">")
+			if theme = normalizeTheme(theme); theme != "" {
+				out.WriteString("<input type=\"hidden\" name=\"theme\" value=\"")
+				out.WriteString(html.EscapeString(theme))
+				out.WriteString("\">")
+			}
+			out.WriteString("<button class=\"button\" type=\"submit\">Run warmup</button></form>")
 		}
 		out.WriteString("</td></tr>")
 	}

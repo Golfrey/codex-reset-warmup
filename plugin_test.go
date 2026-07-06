@@ -621,7 +621,7 @@ func TestHandleManagementManualWarmupPOSTRedirectsToStatusTab(t *testing.T) {
 		Headers: http.Header{
 			"Content-Type": []string{"application/x-www-form-urlencoded"},
 		},
-		Body: []byte("auth_index=idx-1"),
+		Body: []byte("auth_index=idx-1&theme=dark"),
 	}
 	rawReq, errMarshal := json.Marshal(req)
 	if errMarshal != nil {
@@ -646,7 +646,7 @@ func TestHandleManagementManualWarmupPOSTRedirectsToStatusTab(t *testing.T) {
 		t.Fatalf("status = %d, want 303", resp.StatusCode)
 	}
 	location := resp.Headers.Get("Location")
-	if !strings.HasPrefix(location, resourceFullPath+"?") || !strings.Contains(location, "notice=warmup_ok") || !strings.Contains(location, "auth_index=idx-1") {
+	if !strings.HasPrefix(location, resourceFullPath+"?") || !strings.Contains(location, "notice=warmup_ok") || !strings.Contains(location, "auth_index=idx-1") || !strings.Contains(location, "theme=dark") {
 		t.Fatalf("Location = %q, want status tab success redirect", location)
 	}
 }
@@ -657,7 +657,7 @@ func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 		AuthIndex: "idx-1",
 		Provider:  "codex",
 		Name:      "codex-a.json",
-	}}, "", ""))
+	}}, "", "", "dark"))
 	for _, want := range []string{"Operational Summary", "Manual Warmup", "Timers", "Recent Warmups", "Runtime Settings"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("status page missing %q:\n%s", want, page)
@@ -665,6 +665,9 @@ func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 	}
 	if !strings.Contains(page, `method="post"`) || !strings.Contains(page, warmupActionPath) || !strings.Contains(page, `name="auth_index" value="idx-1"`) {
 		t.Fatalf("status page missing manual warmup POST form:\n%s", page)
+	}
+	if !strings.Contains(page, `<html data-theme="dark">`) || !strings.Contains(page, `name="theme" value="dark"`) || !strings.Contains(page, "prefers-color-scheme:dark") {
+		t.Fatalf("status page missing theme support:\n%s", page)
 	}
 	if strings.Contains(page, "action=warmup") {
 		t.Fatalf("status page still contains old GET warmup action:\n%s", page)
