@@ -92,8 +92,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             tag="v${{ github.event.inputs.version }}"
           fi
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            gh release upload "${tag}" release/* --clobber
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" release/* --clobber --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${tag}" release/* --title "${tag}" --notes "CLIProxyAPI plugin release ${tag}"
+            gh release create "${tag}" release/* --title "${tag}" --notes "CLIProxyAPI plugin release ${tag}" --repo "${GITHUB_REPOSITORY}"
           fi
