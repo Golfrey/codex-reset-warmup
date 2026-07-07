@@ -13,7 +13,7 @@ The official store is not an artifact host. Its README says the store is a light
 
 ## Store Model
 
-The current official store README requires `registry.json` to use `schema_version: 1` and lists the registry entry shape: required fields are `id`, `name`, `description`, `author`, and `repository`; optional fields are `version`, `logo`, `homepage`, `license`, and `tags`.[^registry-shape] The official store README also says `repository` must be exactly `https://github.com/{owner}/{repo}`.[^validation-rules]
+The current official store README requires `registry.json` to use `schema_version: 1` and lists the registry entry shape: required fields are `id`, `name`, `description`, `author`, and `repository`; optional fields include `version`, `logo`, `homepage`, `license`, and `tags`.[^registry-shape] For this plugin, omit `version` from the store entry so the store does not duplicate release state; CLIProxyAPI discovers the installable version from the latest GitHub Release. The official store README also says `repository` must be exactly `https://github.com/{owner}/{repo}`.[^validation-rules]
 
 CLIProxyAPI source supports two install types, `github-release` and `direct`, but `PluginInstallType` defaults an omitted `install.type` to `github-release`.[^install-types] Because the official store README requires schema v1 and the source rejects direct installs in schema v1, the official-store path for this plugin should be a normal GitHub-release entry with no `install` block.[^schema-direct]
 
@@ -21,16 +21,16 @@ CLIProxyAPI reads the configured registry, parses it as JSON, validates plugin r
 
 ## Release Requirements
 
-For GitHub-release installs, CLIProxyAPI fetches the latest GitHub release for the plugin repository through `https://api.github.com/repos/{owner}/{repo}/releases/latest`.[^latest-release] A release tag is converted into the plugin version by stripping a leading `v` or `V`; the official store README requires tags in `v<version>` form such as `v0.1.1`.[^release-version] The current plugin version is `0.1.1`, matching `pluginVersion = "0.1.1"` in this repo.[^local-version]
+For GitHub-release installs, CLIProxyAPI fetches the latest GitHub release for the plugin repository through `https://api.github.com/repos/{owner}/{repo}/releases/latest`.[^latest-release] A release tag is converted into the plugin version by stripping a leading `v` or `V`; the official store README requires tags in `v<version>` form such as `v0.1.4`.[^release-version] The current plugin version is `0.1.4`, matching `pluginVersion = "0.1.4"` in this repo.[^local-version]
 
 Each release must include one `checksums.txt` asset and one zip asset per supported platform. The official store README specifies asset names as `<id>_<version>_<goos>_<goarch>.zip` plus `checksums.txt`, with the version omitting the leading `v`.[^asset-names] CLIProxyAPI source uses the same archive-name function and selects exactly that archive plus `checksums.txt` from the release assets.[^select-assets]
 
-For `codex-reset-warmup` version `0.1.1`, expected asset names are:
+For `codex-reset-warmup` version `0.1.4`, expected asset names are:
 
 ```text
-codex-reset-warmup_0.1.1_darwin_arm64.zip
-codex-reset-warmup_0.1.1_darwin_amd64.zip
-codex-reset-warmup_0.1.1_linux_amd64.zip
+codex-reset-warmup_0.1.4_darwin_arm64.zip
+codex-reset-warmup_0.1.4_darwin_amd64.zip
+codex-reset-warmup_0.1.4_linux_amd64.zip
 checksums.txt
 ```
 
@@ -38,7 +38,7 @@ Add `linux_arm64` and `windows_amd64` only if those builds are actually produced
 
 `checksums.txt` must be in sha256sum format, and the installer parses the first field as a 64-character SHA-256 hex digest keyed by filename.[^checksum-readme][^checksum-source] CLIProxyAPI downloads the selected archive and `checksums.txt`, parses the checksums, and rejects the install if the archive checksum does not match.[^install-release]
 
-Each platform zip must contain one dynamic library at the zip root. The official store README names the expected library as `<id>.dylib` on Darwin, `<id>.so` on Linux, and `<id>.dll` on Windows.[^zip-layout] CLIProxyAPI source also accepts a versioned root filename, `codex-reset-warmup-v0.1.1.<ext>`, but rejects nested dynamic libraries, mismatched filenames, and multiple dynamic libraries.[^zip-source]
+Each platform zip must contain one dynamic library at the zip root. The official store README names the expected library as `<id>.dylib` on Darwin, `<id>.so` on Linux, and `<id>.dll` on Windows.[^zip-layout] CLIProxyAPI source also accepts a versioned root filename, such as `codex-reset-warmup-v0.1.4.<ext>`, but rejects nested dynamic libraries, mismatched filenames, and multiple dynamic libraries.[^zip-source]
 
 ## Plugin-Specific Prerequisites
 
@@ -47,15 +47,15 @@ Each platform zip must contain one dynamic library at the zip root. The official
    - `id`: `codex-reset-warmup`, from `pluginName`.[^local-version]
    - `name`: `Codex Reset Warmup`, matching the management resource menu and README title.[^management-resource][^readme-summary]
    - `author`: current plugin registration uses `router-for-me`.[^registration-metadata]
-   - `version`: optional display fallback, but if included it must be `0.1.1` and must not start with `v`.[^validation-rules][^local-version]
+   - Do not include `version`; the latest GitHub Release tag is the source of release truth.[^release-version][^latest-release]
    - `license`: `MIT`, matching this repo's `LICENSE`.[^local-license]
    - `tags`: suggested `Management`, `Scheduler`, `Codex`, `Warmup`.
 3. Build and package release archives from a clean commit. This repo's README already documents the Go build mode for Darwin as `go build -buildmode=c-shared -o /tmp/codex-reset-warmup.dylib .`; CI should run the same build mode for each target platform and delete the generated `.h` file before zipping only the dynamic library.[^local-build]
 4. Validate every archive before creating the store PR:
-   - Archive filename matches `codex-reset-warmup_0.1.1_<goos>_<goarch>.zip`.
+   - Archive filename matches `codex-reset-warmup_0.1.4_<goos>_<goarch>.zip`.
    - The archive root contains only one target dynamic library with an accepted name.
    - `checksums.txt` contains the SHA-256 for every zip.
-   - The GitHub release is public and tagged `v0.1.1`.
+   - The GitHub release is public and tagged `v0.1.4`.
 5. Open a PR to `router-for-me/CLIProxyAPI-Plugins-Store` that updates only `registry.json` unless store documentation needs clarification. The official README says the PR should include the plugin GitHub repository URL, latest release tag, evidence that the required zip asset and `checksums.txt` exist, and a short description of the plugin capability.[^adding-plugin]
 
 ## Implemented Support Files
@@ -63,7 +63,6 @@ Each platform zip must contain one dynamic library at the zip root. The official
 This repo now includes:
 
 - `scripts/package-release.sh`, which builds the current platform with `go build -buildmode=c-shared`, writes a correctly named zip, and updates `dist/checksums.txt`.
-- `.github/workflows/release.yml`, which builds `linux/amd64`, `darwin/amd64`, and `darwin/arm64` release assets and publishes them to a GitHub Release. In CI it replaces the local CLIProxyAPI SDK development path with `github.com/router-for-me/CLIProxyAPI/v7@main`, because the plugin SDK packages used here are not available in the older `v7.0.0` module release. Both Darwin archives build on `macos-14`; the amd64 archive is cross-built because the older Intel runner can be slow to schedule.
 - `docs/publishing/registry-entry.json`, which is the current official-store registry-entry draft.
 - `.gitignore`, which excludes generated `dist/` files and C headers.
 
@@ -77,7 +76,6 @@ Use this as the starting entry after replacing `<owner>/<repo>` with the final p
   "name": "Codex Reset Warmup",
   "description": "Schedules lightweight Codex warmup requests at known reset boundaries so CLIProxyAPI Codex auths stay ready after 5-hour and weekly resets.",
   "author": "router-for-me",
-  "version": "0.1.1",
   "repository": "https://github.com/<owner>/<repo>",
   "homepage": "https://github.com/<owner>/<repo>",
   "license": "MIT",

@@ -11,7 +11,7 @@ import (
 // Shared defaults and host-facing names used across the plugin.
 const (
 	pluginName           = "codex-reset-warmup"
-	pluginVersion        = "0.1.3"
+	pluginVersion        = "0.1.4"
 	defaultWarmupModel   = "gpt-5.4-mini"
 	defaultWarmupPrompt  = "ping"
 	defaultManualMode    = "host_model"
