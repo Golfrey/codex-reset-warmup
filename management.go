@@ -113,9 +113,9 @@ func manualWarmupRedirect(kind string, authIndex string, status string, message 
 		values.Set("theme", theme)
 	}
 	if encoded := values.Encode(); encoded != "" {
-		return resourceFullPath + "?" + encoded
+		return resourceRelativePath + "?" + encoded
 	}
-	return resourceFullPath
+	return resourceRelativePath
 }
 
 func noticeFromQuery(query url.Values) (string, string) {
@@ -144,6 +144,7 @@ func (s *pluginState) renderStatusPage(auths []pluginapi.HostAuthFileEntry, noti
 	writeTimersTable(&out, snapshot.timers)
 	writeResultsTable(&out, snapshot.results)
 	writeRuntimeSettings(&out, snapshot)
+	writeStatusPageScript(&out)
 	out.WriteString("</main></body></html>")
 	return out.Bytes()
 }
@@ -349,6 +350,77 @@ func writeStatusPageStart(out *bytes.Buffer, notice string, noticeError string, 
 	}
 }
 
+const statusPageScript = `
+(() => {
+	const storageKey = "codex-reset-warmup-management-key";
+	function findManagementKey() {
+		for (const storage of [window.sessionStorage, window.localStorage]) {
+			if (!storage) continue;
+			for (const key of [storageKey, "managementKey", "cpa-management-key", "cpaManagementKey"]) {
+				try {
+					const value = storage.getItem(key);
+					if (value && value.trim()) return value.trim();
+				} catch (_) {}
+			}
+		}
+		return "";
+	}
+	async function submitWarmup(event) {
+		const form = event.target.closest("form[data-warmup-form]");
+		if (!form) return;
+		event.preventDefault();
+		const button = form.querySelector("button[type=submit]");
+		let key = findManagementKey();
+		if (!key) {
+			key = window.prompt("Management key") || "";
+			key = key.trim();
+		}
+		if (!key) return;
+		try {
+			window.sessionStorage.setItem(storageKey, key);
+		} catch (_) {}
+		if (button) button.disabled = true;
+		try {
+			const body = new URLSearchParams(new FormData(form));
+			const response = await fetch(form.action, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+					"X-Management-Key": key
+				},
+				body
+			});
+			if (response.redirected) {
+				window.location.assign(response.url);
+				return;
+			}
+			if (response.ok) {
+				window.location.reload();
+				return;
+			}
+			if (response.status === 401 || response.status === 403) {
+				try {
+					window.sessionStorage.removeItem(storageKey);
+				} catch (_) {}
+			}
+			const text = await response.text();
+			window.alert(text || "Warmup failed with status " + response.status);
+		} catch (error) {
+			window.alert(error && error.message ? error.message : "Warmup request failed");
+		} finally {
+			if (button) button.disabled = false;
+		}
+	}
+	document.addEventListener("submit", submitWarmup);
+})();
+`
+
+func writeStatusPageScript(out *bytes.Buffer) {
+	out.WriteString("<script>")
+	out.WriteString(statusPageScript)
+	out.WriteString("</script>")
+}
+
 func writeOperationalSummary(out *bytes.Buffer, snapshot statusPageSnapshot) {
 	health := recentWarmupHealth(snapshot.results)
 	out.WriteString("<section class=\"section\"><h2>Operational Summary</h2><div class=\"grid\">")
@@ -480,8 +552,8 @@ func writeManualWarmupTable(out *bytes.Buffer, auths []pluginapi.HostAuthFileEnt
 		if authIndex == "" {
 			out.WriteString("Missing auth index")
 		} else {
-			out.WriteString("<form method=\"post\" action=\"")
-			out.WriteString(html.EscapeString(warmupActionPath))
+			out.WriteString("<form method=\"post\" data-warmup-form action=\"")
+			out.WriteString(html.EscapeString(warmupRelativePath))
 			out.WriteString("\"><input type=\"hidden\" name=\"auth_index\" value=\"")
 			out.WriteString(html.EscapeString(authIndex))
 			out.WriteString("\">")

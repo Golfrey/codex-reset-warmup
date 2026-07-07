@@ -22,8 +22,10 @@ const (
 	headerTargetAuthID   = "X-Codex-Reset-Warmup-Auth-Id"
 	resourcePath         = "/status"
 	resourceFullPath     = "/v0/resource/plugins/" + pluginName + resourcePath
+	resourceRelativePath = "../../../resource/plugins/" + pluginName + resourcePath
 	managementWarmupPath = "/plugins/" + pluginName + "/warmup"
 	warmupActionPath     = "/v0/management" + managementWarmupPath
+	warmupRelativePath   = "../../../management" + managementWarmupPath
 	resourceContentType  = "text/html; charset=utf-8"
 
 	defaultIdleCheckIntervalMinutes = 120

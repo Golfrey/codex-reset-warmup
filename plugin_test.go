@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -837,7 +838,7 @@ func TestHandleManagementManualWarmupPOSTRedirectsToStatusTab(t *testing.T) {
 		t.Fatalf("status = %d, want 303", resp.StatusCode)
 	}
 	location := resp.Headers.Get("Location")
-	if !strings.HasPrefix(location, resourceFullPath+"?") || !strings.Contains(location, "notice=warmup_ok") || !strings.Contains(location, "auth_index=idx-1") || !strings.Contains(location, "theme=dark") {
+	if !strings.HasPrefix(location, resourceRelativePath+"?") || !strings.Contains(location, "notice=warmup_ok") || !strings.Contains(location, "auth_index=idx-1") || !strings.Contains(location, "theme=dark") {
 		t.Fatalf("Location = %q, want status tab success redirect", location)
 	}
 }
@@ -854,8 +855,14 @@ func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 			t.Fatalf("status page missing %q:\n%s", want, page)
 		}
 	}
-	if !strings.Contains(page, `method="post"`) || !strings.Contains(page, warmupActionPath) || !strings.Contains(page, `name="auth_index" value="idx-1"`) {
+	if !strings.Contains(page, `method="post"`) || !strings.Contains(page, warmupRelativePath) || !strings.Contains(page, `name="auth_index" value="idx-1"`) {
 		t.Fatalf("status page missing manual warmup POST form:\n%s", page)
+	}
+	if !strings.Contains(page, `data-warmup-form`) || !strings.Contains(page, `"X-Management-Key"`) || !strings.Contains(page, `codex-reset-warmup-management-key`) {
+		t.Fatalf("status page missing authenticated warmup submit script:\n%s", page)
+	}
+	if strings.Contains(page, `action="/v0/management`) {
+		t.Fatalf("status page contains root-absolute warmup form action:\n%s", page)
 	}
 	if !strings.Contains(page, `<code>codex-a.json</code>`) {
 		t.Fatalf("status page missing code-styled auth name:\n%s", page)
@@ -865,6 +872,32 @@ func TestRenderStatusPageIncludesDashboardSectionsAndPOSTForm(t *testing.T) {
 	}
 	if strings.Contains(page, "action=warmup") {
 		t.Fatalf("status page still contains old GET warmup action:\n%s", page)
+	}
+}
+
+func TestManagementBrowserPathsPreserveReverseProxyPrefix(t *testing.T) {
+	pageURL, errParsePageURL := url.Parse("https://example.test/cpa/v0/resource/plugins/codex-reset-warmup/status")
+	if errParsePageURL != nil {
+		t.Fatal(errParsePageURL)
+	}
+	actionURL, errParseActionURL := url.Parse(warmupRelativePath)
+	if errParseActionURL != nil {
+		t.Fatal(errParseActionURL)
+	}
+	if got := pageURL.ResolveReference(actionURL).String(); got != "https://example.test/cpa/v0/management/plugins/codex-reset-warmup/warmup" {
+		t.Fatalf("resolved warmup action = %q", got)
+	}
+
+	postURL, errParsePostURL := url.Parse("https://example.test/cpa/v0/management/plugins/codex-reset-warmup/warmup")
+	if errParsePostURL != nil {
+		t.Fatal(errParsePostURL)
+	}
+	redirectURL, errParseRedirectURL := url.Parse(manualWarmupRedirect("warmup_ok", "idx-1", "200", "", ""))
+	if errParseRedirectURL != nil {
+		t.Fatal(errParseRedirectURL)
+	}
+	if got := postURL.ResolveReference(redirectURL).String(); got != "https://example.test/cpa/v0/resource/plugins/codex-reset-warmup/status?auth_index=idx-1&notice=warmup_ok&status=200" {
+		t.Fatalf("resolved warmup redirect = %q", got)
 	}
 }
 
