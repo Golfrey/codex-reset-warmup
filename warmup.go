@@ -59,7 +59,7 @@ func (s *pluginState) runWarmup(entry timerEntry, cfg pluginConfig) warmupResult
 	result.StatusCode = resp.StatusCode
 	responseEntry := entry
 	responseEntry.AuthID = authID
-	s.scheduleFromWarmupResponse(responseEntry, cfg, resp, result.RanAt)
+	s.scheduleFromWarmup(responseEntry, cfg, resp, result.RanAt)
 	if resp.StatusCode >= 400 {
 		result.Error = responseErrorSummary(resp.Body)
 	}
@@ -143,12 +143,22 @@ func (s *pluginState) runManualDirectCodexWarmup(entry timerEntry, cfg pluginCon
 		return result
 	}
 	result.StatusCode = resp.StatusCode
-	s.scheduleFromWarmupResponse(entry, cfg, resp, result.RanAt)
+	s.scheduleFromWarmup(entry, cfg, resp, result.RanAt)
 	if resp.StatusCode >= 400 {
 		result.Error = responseErrorSummary(resp.Body)
 	}
 	s.logWarmupResult("info", "codex reset warmup completed", cfg, result)
 	return result
+}
+
+func (s *pluginState) scheduleFromWarmup(entry timerEntry, cfg pluginConfig, resp pluginapi.HostModelExecutionResponse, now time.Time) bool {
+	if s.scheduleFromWarmupResponse(entry, cfg, resp, now) {
+		return true
+	}
+	if s.hasTimer(entry.AuthIndex) {
+		return false
+	}
+	return s.scheduleFromWarmupProbe(entry, cfg)
 }
 
 // scheduleFromWarmupResponse feeds direct Codex headers/errors back through the same reset parser as normal usage.
@@ -168,6 +178,45 @@ func (s *pluginState) scheduleFromWarmupResponse(entry timerEntry, cfg pluginCon
 		}
 	}
 	return s.handleUsageRecord(record, now)
+}
+
+func (s *pluginState) scheduleFromWarmupProbe(entry timerEntry, cfg pluginConfig) bool {
+	authIndex := strings.TrimSpace(entry.AuthIndex)
+	if authIndex == "" {
+		return false
+	}
+	auth := pluginapi.HostAuthFileEntry{
+		AuthIndex: authIndex,
+		ID:        strings.TrimSpace(entry.AuthID),
+		Provider:  "codex",
+	}
+	now := time.Now()
+	boundary, probed, errProbe := s.probeCodexUsage(auth, cfg, now)
+	if errProbe != nil {
+		s.logHost("warn", "codex warmup follow-up usage probe failed", map[string]any{
+			"auth_index": authIndex,
+			"auth_id":    strings.TrimSpace(entry.AuthID),
+			"error":      errProbe.Error(),
+		})
+		return false
+	}
+	if !probed {
+		s.logHost("info", "codex warmup follow-up usage probe found no eligible reset boundary", map[string]any{
+			"auth_index": authIndex,
+			"auth_id":    strings.TrimSpace(entry.AuthID),
+		})
+		return false
+	}
+	if !s.registerTimer(boundary, now) {
+		return false
+	}
+	s.logHost("info", "codex warmup follow-up usage probe scheduled reset timer", map[string]any{
+		"auth_index": authIndex,
+		"auth_id":    strings.TrimSpace(boundary.AuthID),
+		"window":     boundary.Window,
+		"reset_at":   boundary.ResetAt.Format(time.RFC3339),
+	})
+	return true
 }
 
 func (s *pluginState) runManualHTTPWarmup(entry timerEntry, cfg pluginConfig) warmupResult {
@@ -194,7 +243,7 @@ func (s *pluginState) runManualHTTPWarmup(entry timerEntry, cfg pluginConfig) wa
 		return result
 	}
 	result.StatusCode = resp.StatusCode
-	s.scheduleFromWarmupResponse(entry, cfg, resp, result.RanAt)
+	s.scheduleFromWarmup(entry, cfg, resp, result.RanAt)
 	s.logWarmupResult("info", "codex reset warmup completed", cfg, result)
 	return result
 }

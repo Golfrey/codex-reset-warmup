@@ -429,6 +429,9 @@ func TestRunManualWarmupHTTPUsesCPAEndpointAndPrivateHeaders(t *testing.T) {
 		if !ok {
 			t.Fatalf("host.http.do payload = %T, want pluginapi.HTTPRequest", call.payload)
 		}
+		if req.URL != "http://127.0.0.1:8318/v1/chat/completions" {
+			continue
+		}
 		httpReq = req
 	}
 	if httpReq.URL != "http://127.0.0.1:8318/v1/chat/completions" {
@@ -470,6 +473,9 @@ func TestRunManualWarmupDirectCodexUsesPhysicalAuthAndBypassesCPA(t *testing.T) 
 		req, ok := call.payload.(pluginapi.HTTPRequest)
 		if !ok {
 			t.Fatalf("host.http.do payload = %T, want pluginapi.HTTPRequest", call.payload)
+		}
+		if req.URL != "https://codex.example.test/backend-api/codex/responses" {
+			continue
 		}
 		httpReq = req
 	}
@@ -745,6 +751,55 @@ func TestTimerWarmupSchedulesSuccessorFromResponse(t *testing.T) {
 	state.mu.Unlock()
 	if entry == nil || entry.Window != "usage_limit_reached" {
 		t.Fatalf("timer entry = %#v, want successor usage_limit_reached timer", entry)
+	}
+}
+
+func TestTimerWarmupSchedulesSuccessorFromFollowUpProbe(t *testing.T) {
+	host := &fakeHost{
+		usageResponse: pluginapi.HTTPResponse{
+			StatusCode: http.StatusOK,
+			Body:       []byte(`{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":120}}}`),
+		},
+	}
+	state := newPluginState(host)
+	var timers []*fakeTimer
+	state.timerFactory = func(d time.Duration, f func()) stoppableTimer {
+		timer := &fakeTimer{fire: f}
+		timers = append(timers, timer)
+		return timer
+	}
+	now := time.Unix(1000, 0)
+	record := pluginapi.UsageRecord{
+		Provider:  "codex",
+		AuthIndex: "idx-1",
+		AuthID:    "auth-1",
+		ResponseHeaders: http.Header{
+			"X-Codex-Primary-Window-Minutes":      []string{"300"},
+			"X-Codex-Primary-Reset-After-Seconds": []string{"1"},
+		},
+	}
+	if !state.handleUsageRecord(record, now) {
+		t.Fatal("handleUsageRecord() did not register initial timer")
+	}
+	timers[0].fire()
+	if len(timers) != 2 {
+		t.Fatalf("timers created = %d, want successor timer", len(timers))
+	}
+	state.mu.Lock()
+	entry := state.timers["idx-1"]
+	state.mu.Unlock()
+	if entry == nil || entry.Window != "5h" || entry.AuthID != "auth-runtime" {
+		t.Fatalf("timer entry = %#v, want successor 5h timer from follow-up probe", entry)
+	}
+	var sawProbe bool
+	for _, call := range host.calls {
+		req, ok := call.payload.(pluginapi.HTTPRequest)
+		if call.method == "host.http.do" && ok && req.URL == codexUsageProbeURL {
+			sawProbe = true
+		}
+	}
+	if !sawProbe {
+		t.Fatalf("host calls = %#v, want follow-up usage probe", host.calls)
 	}
 }
 

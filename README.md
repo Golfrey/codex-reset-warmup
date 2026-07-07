@@ -56,7 +56,7 @@ Auto timer warmups use `host.model.execute`. Manual warmups can use `host_model`
 
 The idle check is a watchdog for Codex auths that currently have no reset timer. The first idle check runs one minute after the plugin starts; after that, every `idle_check_interval_minutes`, it lists Codex auths and skips auths that already have timers. For untimed auths, it first queries `https://chatgpt.com/backend-api/wham/usage` directly and registers a timer from the earliest enabled future primary/5-hour or secondary/weekly reset boundary. If the probe fails or returns no eligible reset boundary, the idle check sends a warmup request with `idle_check_mode`.
 
-Warmup responses from timer fires, manual warmups, and idle-check fallbacks are parsed for reset information when headers or failure bodies are available, so a warmup can immediately register the next timer.
+Warmup responses from timer fires, manual warmups, and idle-check fallbacks are parsed for reset information when headers or failure bodies are available. If a warmup response does not reveal a reset boundary, the plugin immediately runs the direct usage probe for that auth before giving up, so a warmup can still register the next timer when `/wham/usage` exposes the boundary.
 
 ## Code Layout
 
